@@ -12,11 +12,16 @@ const IDEMPOTENCY_MAX = 500;
 
 function pruneProcessed() {
   const now = Date.now();
-  for (const [id, ts] of processedEvents) {
+  const entries = Array.from(processedEvents.entries());
+  for (let i = 0; i < entries.length; i++) {
+    const id = entries[i][0];
+    const ts = entries[i][1];
     if (now - ts > IDEMPOTENCY_TTL_MS) processedEvents.delete(id);
   }
   if (processedEvents.size > IDEMPOTENCY_MAX) {
-    const sorted = [...processedEvents.entries()].sort((a, b) => a[1] - b[1]);
+    const sorted = Array.from(processedEvents.entries()).sort(function (a, b) {
+      return a[1] - b[1];
+    });
     for (let i = 0; i < sorted.length - IDEMPOTENCY_MAX; i++) {
       processedEvents.delete(sorted[i][0]);
     }
@@ -78,7 +83,6 @@ export async function POST(req: NextRequest) {
 
   const stripe = new Stripe(key, { apiVersion: "2024-06-20" });
 
-  // Raw body is required for signature verification — never req.json() first
   let body: string;
   try {
     body = await req.text();
@@ -101,7 +105,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Verify Stripe-Signature (HMAC) — rejects forged or replayed-with-bad-sig requests
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(body, signature, secret);
@@ -111,7 +114,6 @@ export async function POST(req: NextRequest) {
     return jsonError("Invalid Stripe signature", 400, "invalid_signature");
   }
 
-  // Idempotency: acknowledge duplicates with 200 so Stripe stops retrying
   pruneProcessed();
   if (processedEvents.has(event.id)) {
     return NextResponse.json({
