@@ -47,12 +47,12 @@ export default function Home(){
     const q=new URLSearchParams(window.location.search);
     if(q.get("success")!=="true")return;
     const sid=q.get("session_id");
-    const go=()=>{setPlan("pro"); window.history.replaceState({},"",window.location.pathname);};
-    if(!sid){go();return;}
+    const clear=()=>window.history.replaceState({},"",window.location.pathname);
+    if(!sid||!sid.startsWith("cs_")){clear();return;}
     (async()=>{try{
       const r=await fetch("/api/verify-session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:sid})});
-      const d=await r.json(); if(d.valid)go(); else window.history.replaceState({},"",window.location.pathname);
-    }catch{window.history.replaceState({},"",window.location.pathname);}})();
+      const d=await r.json(); if(d.valid)setPlan("pro");
+    }catch{} finally{clear();}})();
   },[]);
 
   const tax=useMemo(()=>{
