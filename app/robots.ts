@@ -7,6 +7,6 @@ export default function robots(): MetadataRoute.Robots {
       allow: "/",
       disallow: ["/api/"],
     },
-    sitemap: "https://tradequote-beta.vercel.app/sitemap.xml",
+    sitemap: "https://tradequote.faitle.net/sitemap.xml",
   };
 }

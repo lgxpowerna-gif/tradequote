@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const siteUrl = "https://tradequote-beta.vercel.app";
+const siteUrl = "https://tradequote.faitle.net";
 
 export const viewport: Viewport = {
   width: "device-width",

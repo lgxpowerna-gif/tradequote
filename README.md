@@ -2,7 +2,7 @@
 
 Canadian trades quotes & invoices SaaS.
 
-**Live:** https://tradequote-beta.vercel.app
+**Live:** https://tradequote.faitle.net
 
 ## Setup
 
