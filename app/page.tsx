@@ -3,7 +3,9 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { TAX_PRESETS, TEMPLATES, i18n, type Lang } from "@/lib/i18n";
 import { generateTradeQuotePDF } from "@/lib/pdf";
 import { DEFAULT_TAX_PRESET, computeTaxes, formatRate } from "@/lib/tax";
-import { FREE_LIMIT, monthKey, countForThisMonth, resolvePro, isValidSubscriptionId } from "@/lib/plan";
+import { FREE_LIMIT, monthKey, countForThisMonth, resolvePro, isValidSubscriptionId, legacyProActive, migrateLegacyPlan } from "@/lib/plan";
+import { CheckoutConsent, LegalFooterLinks } from "@/components/LegalLinks";
+import { ManageSubscription } from "@/components/LegalClient";
 import { formatRbq, isValidRbq, rbqLine } from "@/lib/rbq";
 
 const NOTES = { fr: "Soumission valide 30 jours. Paiement à la réception de la facture. Merci de votre confiance.", en: "Quote valid for 30 days. Payment due on receipt of invoice. Thank you." };
@@ -17,6 +19,7 @@ export default function Home(){
   const [view,setView]=useState<View>("app");
   const [lang,setLang]=useState<Lang>("fr");
   const [plan,setPlan]=useState<Plan>("free");
+  const [legacyPro,setLegacyPro]=useState(false);
   const [docType,setDocType]=useState<DocType>("quote");
   const [count,setCount]=useState(0);
   const [history,setHistory]=useState<Saved[]>([]);
@@ -40,7 +43,7 @@ export default function Home(){
     const co=localStorage.getItem("tq_company");
     const l=localStorage.getItem("tq_lang") as Lang|null;
     setCount(c); if(h)setHistory(JSON.parse(h)); if(co)setCompany(prev=>({...prev,...JSON.parse(co)}));
-    if(l==="en"){setLang("en"); setMeta(m=>({...m,notes:NOTES.en,number:docNo("quote","en")}));}
+    if(l==="en"&&localStorage.getItem("tq_lang_choice")==="1"){setLang("en"); setMeta(m=>({...m,notes:NOTES.en,number:docNo("quote","en")}));}
     const qv=new URLSearchParams(window.location.search).get("view"); if(qv==="pricing"||qv==="history")setView(qv);
   }catch{}},[]);
 
@@ -54,11 +57,18 @@ export default function Home(){
     const last=parseInt(localStorage.getItem("tq_pro_confirmed_at")||"",10)||null;
     if(serverPro===true)localStorage.setItem("tq_pro_confirmed_at",String(Date.now()));
     if(serverPro===false){localStorage.removeItem("tq_sub"); localStorage.removeItem("tq_pro_confirmed_at");}
-    setPlan(resolvePro(serverPro,last)?"pro":"free");
+    const pro=resolvePro(serverPro,last);
+    setPlan(pro||legacyProActive(localStorage.getItem("tq_legacy_pro"))?"pro":"free");
+    if(pro)localStorage.removeItem("tq_legacy_pro");
   },[]);
   useEffect(()=>{try{
+    const restore=new URLSearchParams(window.location.search).get("restore"); // restore link sent by email
+    if(isValidSubscriptionId(restore)){localStorage.setItem("tq_sub",restore); window.history.replaceState({},"",window.location.pathname);}
+    if(migrateLegacyPlan(localStorage.getItem("tq_plan"),localStorage.getItem("tq_sub"))==="legacy")localStorage.setItem("tq_legacy_pro","1");
     localStorage.removeItem("tq_plan");
-    const sub=localStorage.getItem("tq_sub"); if(isValidSubscriptionId(sub))checkSub(sub);
+    const sub=localStorage.getItem("tq_sub");
+    if(isValidSubscriptionId(sub))checkSub(sub);
+    else if(legacyProActive(localStorage.getItem("tq_legacy_pro"))){setLegacyPro(true); setPlan("pro");}
   }catch{}},[checkSub]);
 
   useEffect(()=>{try{
@@ -130,7 +140,7 @@ export default function Home(){
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <select value={lang} onChange={e=>{const nl=e.target.value as Lang; setMeta(m=>m.notes===NOTES[lang]?{...m,notes:NOTES[nl]}:m); setLang(nl);}} className="text-xs border rounded-md px-2 py-1.5" aria-label="Langue / Language"><option value="fr">FR</option><option value="en">EN</option></select>
+            <select value={lang} onChange={e=>{const nl=e.target.value as Lang; try{localStorage.setItem("tq_lang_choice","1");}catch{} setMeta(m=>m.notes===NOTES[lang]?{...m,notes:NOTES[nl]}:m); setLang(nl);}} className="text-xs border rounded-md px-2 py-1.5" aria-label="Langue / Language"><option value="fr">FR</option><option value="en">EN</option></select>
             {plan==="free"?<button onClick={()=>setView("pricing")} className="bg-blue-600 text-white text-sm font-semibold px-3 py-1.5 rounded-lg">{t.upgrade}</button>
               :<span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">{t.pro}</span>}
           </div>
@@ -145,10 +155,15 @@ export default function Home(){
             <button disabled={loading} onClick={()=>upgrade("monthly")} className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold mb-2 disabled:opacity-60">{t.monthly}</button>
             <button disabled={loading} onClick={()=>upgrade("yearly")} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold mb-2 disabled:opacity-60">{t.yearly}</button>
             <button onClick={()=>setShowUp(false)} className="w-full text-slate-500 text-sm py-2">{t.continueFree}</button>
+            <CheckoutConsent lang={lang} className="text-center"/>
           </div>
         </div>
       )}
 
+      {legacyPro&&<div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-xs px-4 py-2 text-center">
+        {lang==="fr"?"Votre accès Pro est conservé jusqu'au 31 décembre 2026. Pour le lier à votre abonnement Stripe, écrivez à ":"Your Pro access is kept until December 31, 2026. To link it to your Stripe subscription, email "}
+        <a href="mailto:lgxpowerna@gmail.com" className="underline">lgxpowerna@gmail.com</a>
+      </div>}
       <main className="max-w-6xl mx-auto px-4 py-6">
         {view==="pricing"&&(
           <div className="max-w-3xl mx-auto">
@@ -168,6 +183,7 @@ export default function Home(){
                 <ul className="space-y-2 text-sm mb-6">{t.featurePro.map(f=><li key={f} className="flex gap-2"><span className="text-emerald-300">✓</span>{f}</li>)}</ul>
                 <button disabled={loading} onClick={()=>upgrade("monthly")} className="w-full bg-white text-blue-700 py-2.5 rounded-xl font-semibold mb-2 disabled:opacity-60">{t.startMo}</button>
                 <button disabled={loading} onClick={()=>upgrade("yearly")} className="w-full bg-blue-500/40 border border-white/30 py-2.5 rounded-xl font-medium disabled:opacity-60">{t.startYr}</button>
+                <CheckoutConsent lang={lang} dark className="mt-3"/>
               </div>
             </div>
             <p className="text-center text-xs text-slate-500 mt-4"><a href={lang==="fr"?"/tarifs":"/pricing"} className="text-blue-600 hover:underline">{lang==="fr"?"Détails des forfaits et FAQ →":"Plan details & FAQ →"}</a></p>
@@ -332,8 +348,9 @@ export default function Home(){
       <footer className="border-t mt-12 py-8 text-center text-sm text-slate-500">
         <p className="font-medium text-slate-700">{t.brand}</p>
         <p>{t.footer}</p>
-        <nav className="mt-2 flex justify-center gap-4 text-xs"><a href={lang==="fr"?"/tarifs":"/pricing"} className="text-blue-600 hover:underline">{t.pricing}</a></nav>
-        <p className="text-xs mt-2 text-slate-400">© {new Date().getFullYear()} {t.brand} – {t.rights}</p>
+        <LegalFooterLinks lang={lang} className="mt-2"/>
+        {plan==="pro"&&<div className="mt-2"><ManageSubscription lang={lang} compact/></div>}
+        <p className="text-xs mt-2 text-slate-400">© {new Date().getFullYear()} {t.brand} – Janvier Alie (Multilaser Créations), Mont-Laurier (QC) – {t.rights}</p>
       </footer>
     </div>
   );
