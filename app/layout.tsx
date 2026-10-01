@@ -12,15 +12,17 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: "TradeQuote – Quotes & Invoices for Canadian Trades | GST/HST",
+    default: "TradeQuote – Soumissions et factures pour entrepreneurs du Québec | RBQ, TPS/TVQ",
     template: "%s | TradeQuote",
   },
   description:
-    "Professional quotes and invoices for renovation, contractors & trades in Canada. Deposits, Interac, GST/HST by province. Free plan · Pro from $9/mo CAD.",
+    "Soumissions et factures professionnelles en français pour entrepreneurs et gens de métier du Québec : licence RBQ imprimée, TPS 5 % + TVQ 9,975 %, acomptes, Virement Interac. Gratuit · Pro 9 $/mois.",
   keywords: [
     "contractor quote software Canada",
     "renovation invoice",
-    "devis rénovation",
+    "soumission rénovation",
+    "licence RBQ soumission",
+    "facture TPS TVQ",
     "trade invoice GST HST",
     "construction quote generator",
     "deposit invoice Canada",
@@ -39,19 +41,19 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
-    locale: "en_CA",
-    alternateLocale: ["fr_CA"],
+    locale: "fr_CA",
+    alternateLocale: ["en_CA"],
     url: siteUrl,
     siteName: "TradeQuote",
-    title: "TradeQuote – Quotes & Invoices for Canadian Trades",
+    title: "TradeQuote – Soumissions conformes RBQ avec TPS/TVQ",
     description:
-      "Quotes, deposits & invoices for trades. GST/HST ready. Free to start · Pro $9/mo.",
+      "Soumissions, acomptes et factures pour gens de métier. Licence RBQ, TPS/TVQ. Gratuit · Pro 9 $/mois.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "TradeQuote – Canadian Trades Quotes & Invoices",
+    title: "TradeQuote – Soumissions et factures pour entrepreneurs",
     description:
-      "Win jobs with professional quotes. GST/HST · deposits · Interac. Free plan.",
+      "Décrochez plus de contrats avec des soumissions pro. RBQ · TPS/TVQ · acomptes · Interac.",
   },
   category: "business",
 };
@@ -68,9 +70,9 @@ const jsonLd = {
     { "@type": "Offer", price: "79.00", priceCurrency: "CAD", name: "Pro Yearly" },
   ],
   description:
-    "Quote and invoice software for Canadian trades and renovation contractors.",
+    "Logiciel de soumissions et factures pour entrepreneurs et gens de métier du Québec (RBQ, TPS/TVQ).",
   url: siteUrl,
-  inLanguage: ["en", "fr"],
+  inLanguage: ["fr-CA", "en-CA"],
 };
 
 export default function RootLayout({
@@ -79,7 +81,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="fr-CA">
       <head>
         <script
           type="application/ld+json"

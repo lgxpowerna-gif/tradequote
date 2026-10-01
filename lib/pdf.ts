@@ -1,20 +1,21 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { formatRate, type TaxLine } from "./tax";
+import { rbqLine } from "./rbq";
 
 type PdfArgs = {
   docType: "quote" | "invoice";
   lang: "en" | "fr";
   plan: "free" | "pro";
   meta: { number: string; date: string; notes: string };
-  company: { name: string; address: string; city: string; email: string; phone: string; bn: string; gst: string; interac: string };
+  company: { name: string; address: string; city: string; email: string; phone: string; bn: string; gst: string; qst?: string; rbq?: string; interac: string };
   client: { name: string; address: string; city: string; email: string };
   jobSite: string;
   items: { description: string; quantity: number; unitPrice: number }[];
   subtotal: number;
   discountPct: number;
   discountAmount: number;
-  tax: { rate: number; name: string };
-  taxAmt: number;
+  taxLines: TaxLine[];
   total: number;
   depositPct: number;
   depositAmt: number;
@@ -26,12 +27,17 @@ export function generateTradeQuotePDF(a: PdfArgs) {
   const doc = new jsPDF();
   const w = doc.internal.pageSize.getWidth();
   const primary: [number, number, number] = [37, 99, 235];
+  const fr = a.lang === "fr";
+  // jsPDF core fonts are WinAnsi: replace the narrow no-break spaces used by fr-CA number formatting.
   const formatMoney = (n: number) =>
-    new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(n);
+    new Intl.NumberFormat(fr ? "fr-CA" : "en-CA", { style: "currency", currency: "CAD" })
+      .format(n)
+      .replace(/[\u202f\u00a0]/g, " ");
+  const rbq = rbqLine(a.company.rbq || "", a.lang);
 
   const title =
     a.docType === "quote"
-      ? a.lang === "fr" ? "DEVIS" : "QUOTE"
+      ? fr ? "SOUMISSION" : "QUOTE"
       : a.lang === "fr" ? "FACTURE" : "INVOICE";
 
   doc.setFillColor(...primary);
@@ -44,6 +50,11 @@ export function generateTradeQuotePDF(a: PdfArgs) {
   doc.setFont("helvetica", "normal");
   doc.text(`# ${a.meta.number}`, w - 14, 12, { align: "right" });
   doc.text(a.meta.date, w - 14, 18, { align: "right" });
+  if (rbq) {
+    doc.setFont("helvetica", "bold");
+    doc.text(rbq, w - 14, 24, { align: "right" });
+    doc.setFont("helvetica", "normal");
+  }
 
   let y = 36;
   doc.setTextColor(100);
@@ -55,27 +66,34 @@ export function generateTradeQuotePDF(a: PdfArgs) {
   doc.setFontSize(11);
   doc.setTextColor(20);
   doc.setFont("helvetica", "bold");
-  doc.text(a.company.name || "Your Business", 14, y);
+  doc.text(a.company.name || (fr ? "Votre entreprise" : "Your Business"), 14, y);
   doc.text(a.client.name || "Client", w / 2 + 4, y);
   y += 5;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor(70);
   const left = [
+    rbq,
     a.company.address,
     a.company.city,
     a.company.email,
     a.company.phone,
-    a.company.bn && `BN: ${a.company.bn}`,
-    a.company.gst && `GST/HST: ${a.company.gst}`,
+    a.company.bn && `${fr ? "NEQ" : "BN"} : ${a.company.bn}`,
+    a.company.gst && `${fr ? "N° TPS/TVH" : "GST/HST #"} : ${a.company.gst}`,
+    a.company.qst && `${fr ? "N° TVQ" : "QST #"} : ${a.company.qst}`,
   ].filter(Boolean) as string[];
   const right = [
     a.client.address,
     a.client.city,
     a.client.email,
-    a.jobSite ? `Site: ${a.jobSite}` : "",
+    a.jobSite ? `${fr ? "Chantier" : "Site"} : ${a.jobSite}` : "",
   ].filter(Boolean) as string[];
-  left.forEach((l, i) => doc.text(l, 14, y + i * 4));
+  left.forEach((l, i) => {
+    // RBQ licence line printed in bold, as required on every quote/invoice
+    doc.setFont("helvetica", rbq && i === 0 ? "bold" : "normal");
+    doc.text(l, 14, y + i * 4);
+  });
+  doc.setFont("helvetica", "normal");
   right.forEach((l, i) => doc.text(l, w / 2 + 4, y + i * 4));
 
   const startY = Math.max(y + left.length * 4, y + right.length * 4) + 8;
@@ -110,11 +128,11 @@ export function generateTradeQuotePDF(a: PdfArgs) {
     doc.text(`${a.labels.discount} (${a.discountPct}%)`, w - 70, fy);
     doc.text(`-${formatMoney(a.discountAmount)}`, w - 14, fy, { align: "right" });
   }
-  if (a.tax.rate > 0) {
+  a.taxLines.forEach((line) => {
     fy += 5;
-    doc.text(`${a.tax.name} (${a.tax.rate}%)`, w - 70, fy);
-    doc.text(formatMoney(a.taxAmt), w - 14, fy, { align: "right" });
-  }
+    doc.text(`${line.label} (${formatRate(line.rate, a.lang)})`, w - 70, fy);
+    doc.text(formatMoney(line.amount), w - 14, fy, { align: "right" });
+  });
   fy += 6;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
@@ -138,7 +156,7 @@ export function generateTradeQuotePDF(a: PdfArgs) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(30);
-    doc.text("Interac e-Transfer:", 14, fy);
+    doc.text(fr ? "Virement Interac :" : "Interac e-Transfer:", 14, fy);
     doc.setFont("helvetica", "normal");
     doc.text(a.company.interac, 52, fy);
     fy += 6;
@@ -147,7 +165,7 @@ export function generateTradeQuotePDF(a: PdfArgs) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(100);
-    doc.text(a.lang === "fr" ? "Conditions" : "Terms", 14, fy);
+    doc.text(fr ? "Conditions" : "Terms", 14, fy);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(60);
     doc.text(doc.splitTextToSize(a.meta.notes, w - 28), 14, fy + 4);
@@ -156,16 +174,18 @@ export function generateTradeQuotePDF(a: PdfArgs) {
     doc.setFontSize(32);
     doc.setTextColor(230);
     doc.setFont("helvetica", "bold");
-    doc.text("TRADEQUOTE FREE", w / 2, 150, { align: "center", angle: 25 });
+    doc.text(fr ? "TRADEQUOTE GRATUIT" : "TRADEQUOTE FREE", w / 2, 150, { align: "center", angle: 25 });
   }
   doc.setFontSize(7);
   doc.setTextColor(150);
   doc.setFont("helvetica", "normal");
   doc.text(
-    a.plan === "pro" ? "Generated with TradeQuote Pro" : "Generated with TradeQuote Free",
+    fr
+      ? a.plan === "pro" ? "Généré avec TradeQuote Pro" : "Généré avec TradeQuote Gratuit – tradequote.faitle.net"
+      : a.plan === "pro" ? "Generated with TradeQuote Pro" : "Generated with TradeQuote Free",
     w / 2,
     287,
     { align: "center" }
   );
-  doc.save(`${a.docType}-${a.meta.number}.pdf`);
+  doc.save(`${fr ? (a.docType === "quote" ? "soumission" : "facture") : a.docType}-${a.meta.number}.pdf`);
 }
