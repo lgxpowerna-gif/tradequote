@@ -7,6 +7,8 @@ import { FREE_LIMIT, monthKey, countForThisMonth, resolvePro, isValidSubscriptio
 import { CheckoutConsent, LegalFooterLinks } from "@/components/LegalLinks";
 import { ManageSubscription } from "@/components/LegalClient";
 import { formatRbq, isValidRbq, rbqLine } from "@/lib/rbq";
+import { BackupPanel, downloadBackup } from "@/components/BackupPanel";
+import { BACKUP_SNOOZE_KEY, LAST_EXPORT_KEY, MAX_HISTORY, exportReminderDue, type ImportPlan } from "@/lib/backup";
 
 const NOTES = { fr: "Soumission valide 30 jours. Paiement à la réception de la facture. Merci de votre confiance.", en: "Quote valid for 30 days. Payment due on receipt of invoice. Thank you." };
 const docNo = (type: "quote"|"invoice", lang: Lang) => `${type==="quote"?(lang==="fr"?"S":"Q"):(lang==="fr"?"F":"INV")}-${new Date().getFullYear()}-${Math.floor(Math.random()*9000)+1000}`;
@@ -14,6 +16,7 @@ const docNo = (type: "quote"|"invoice", lang: Lang) => `${type==="quote"?(lang==
 type Plan="free"|"pro"; type DocType="quote"|"invoice"; type View="app"|"pricing"|"history";
 type Item={id:number;description:string;quantity:number;unitPrice:number};
 type Saved={id:string;type:DocType;number:string;clientName:string;total:number;date:string};
+const EMPTY_COMPANY={name:"",address:"",city:"",email:"",phone:"",bn:"",gst:"",qst:"",rbq:"",interac:""};
 
 export default function Home(){
   const [view,setView]=useState<View>("app");
@@ -32,7 +35,9 @@ export default function Home(){
   const [toast,setToast]=useState<string|null>(null);
   const [jobSite,setJobSite]=useState("");
   const t=i18n[lang];
-  const [company,setCompany]=useState({name:"",address:"",city:"",email:"",phone:"",bn:"",gst:"",qst:"",rbq:"",interac:""});
+  const [company,setCompany]=useState(EMPTY_COMPANY);
+  const [lastExport,setLastExport]=useState<number|null>(null);
+  const [reminder,setReminder]=useState(false);
   const [client,setClient]=useState({name:"",address:"",city:"",email:""});
   const [meta,setMeta]=useState({number:docNo("quote","fr"),date:new Date().toISOString().slice(0,10),due:"",notes:NOTES.fr});
   const [items,setItems]=useState<Item[]>([{id:1,description:"",quantity:1,unitPrice:0}]);
@@ -45,6 +50,8 @@ export default function Home(){
     setCount(c); if(h)setHistory(JSON.parse(h)); if(co)setCompany(prev=>({...prev,...JSON.parse(co)}));
     if(l==="en"&&localStorage.getItem("tq_lang_choice")==="1"){setLang("en"); setMeta(m=>({...m,notes:NOTES.en,number:docNo("quote","en")}));}
     const qv=new URLSearchParams(window.location.search).get("view"); if(qv==="pricing"||qv==="history")setView(qv);
+    const le=parseInt(localStorage.getItem(LAST_EXPORT_KEY)||"",10); if(le>0)setLastExport(le);
+    setReminder(exportReminderDue({lastExport:localStorage.getItem(LAST_EXPORT_KEY),snoozedAt:localStorage.getItem(BACKUP_SNOOZE_KEY),history:h?JSON.parse(h):[]}));
   }catch{}},[]);
 
   /* Pro is confirmed with Stripe on the server at every load; localStorage "tq_plan" is ignored. */
@@ -111,8 +118,19 @@ export default function Home(){
     generateTradeQuotePDF({docType,lang,plan,meta,company,client,jobSite,items,subtotal,discountPct,discountAmount:discAmt,taxLines:taxes.lines,total,depositPct,depositAmt:depAmt,balance,labels:{description:t.description,qty:t.qty,rate:t.rate,subtotal:t.subtotal,total:t.total,depositAmt:t.depositAmt,balance:t.balance,discount:t.discount}});
     setToast(lang==="fr"?"PDF téléchargé ✓":"PDF downloaded ✓"); setTimeout(()=>setToast(null),2500);
     setCount(c=>c+1);
-    setHistory(h=>[{id:String(Date.now()),type:docType,number:meta.number,clientName:client.name||"Client",total,date:meta.date},...h].slice(0,50));
+    setHistory(h=>[{id:String(Date.now()),type:docType,number:meta.number,clientName:client.name||"Client",total,date:meta.date},...h].slice(0,MAX_HISTORY));
     setMeta(m=>({...m,number:docNo(docType,lang)}));
+  };
+  const flash=(msg:string,ms=2500)=>{setToast(msg); setTimeout(()=>setToast(null),ms);};
+  const exportData=()=>{try{setLastExport(downloadBackup(lang)); setReminder(false); flash(t.backupExported);}catch{flash(t.errRead);}};
+  const snoozeReminder=()=>{try{localStorage.setItem(BACKUP_SNOOZE_KEY,String(Date.now()));}catch{} setReminder(false);};
+  const onImported=(p:ImportPlan,summary:string)=>{
+    setHistory(p.history as Saved[]);
+    setCompany({...EMPTY_COMPANY,...p.company});
+    setCount(p.count);
+    if(p.lang&&p.lang!==lang){const nl=p.lang; setMeta(m=>m.notes===NOTES[lang]?{...m,notes:NOTES[nl]}:m); setLang(nl);}
+    if(p.subChanged){const sub=localStorage.getItem("tq_sub"); if(isValidSubscriptionId(sub)){setLegacyPro(false); checkSub(sub);}}
+    flash(summary,4000);
   };
   const toInv=()=>{setDocType("invoice"); setMeta(m=>({...m,number:docNo("invoice",lang)}));};
   const upgrade=async(mode:"monthly"|"yearly")=>{
@@ -193,6 +211,7 @@ export default function Home(){
         {view==="history"&&(
           <div>
             <h2 className="text-2xl font-bold mb-6">{t.history}</h2>
+            <BackupPanel lang={lang} t={t} lastExport={lastExport} onExport={exportData} onImported={onImported}/>
             {history.length===0?(
               <div className="bg-white border rounded-2xl p-12 text-center text-slate-500">
                 <p className="mb-3">{t.noDocs}</p>
@@ -225,6 +244,10 @@ export default function Home(){
               <span>{t.hero}</span>
               <a href={lang==="fr"?"/tarifs":"/pricing"} className="text-blue-700 font-semibold hover:underline whitespace-nowrap">{t.seePricing} →</a>
             </div>}
+            {reminder&&<div role="status" className="lg:col-span-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm text-amber-900 flex flex-wrap items-center justify-between gap-2">
+              <span>💾 {t.backupReminder}</span>
+              <span className="flex gap-3 whitespace-nowrap"><button onClick={exportData} className="font-semibold underline">{t.backupNow}</button><button onClick={snoozeReminder} className="text-amber-700">{t.backupLater}</button></span>
+            </div>}
             <div className="lg:col-span-2 space-y-4">
               <div className="flex gap-2">
                 <button onClick={()=>setDocType("quote")} className={`px-4 py-2 rounded-lg text-sm font-semibold ${docType==="quote"?"bg-blue-600 text-white":"bg-white border text-slate-600"}`}>{t.quote}</button>
@@ -253,6 +276,7 @@ export default function Home(){
                     <p className={`text-[11px] mt-1 ${company.rbq&&!rbqOk?"text-red-600":"text-slate-400"}`}>{company.rbq&&!rbqOk?t.rbqInvalid:t.rbqHint}</p>
                   </div>
                   <input placeholder={t.interac} value={company.interac} onChange={e=>setCompany({...company,interac:e.target.value})} className={inp}/>
+                  <button type="button" onClick={()=>{setView("history"); window.scrollTo({top:0});}} className="text-xs text-blue-600 hover:underline pt-1">💾 {t.backupLink} →</button>
                 </div>
                 <div className="bg-white border rounded-xl p-4 space-y-2">
                   <div className="font-semibold text-sm mb-2">{t.client}</div>
