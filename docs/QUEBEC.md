@@ -20,3 +20,10 @@
 - **Envoyer / planifier** (`lib/schedule.ts`) : « Partager / Envoyer » utilise la Web Share API avec le fichier PDF (téléphones) ; sinon le PDF est téléchargé et un courriel `mailto:` pré-rempli s'ouvre (le PDF doit être joint à la main). « Ajouter à l'agenda » : lien Google Agenda (événement sur toute la journée, du début à la fin des travaux) et fichier .ics (Outlook, Apple). Champs « Date des travaux » et « Fin des travaux ».
 - **Modèle Toiture** (`lib/i18n.ts`) : 10 lignes typiques, tous les prix à 0 $.
 - Gratuit : historique complet, partage, agenda, modèles. Pro : illimité, sans filigrane, export comptable.
+
+## Ajouts (3 octobre 2026, suite) — logo, carnet de clients, ergonomie
+- **Logo sur le PDF** (`lib/logo.ts`, `components/LogoPicker.tsx`) : PNG ou JPG (max. 5 Mo à l'envoi), redimensionné dans le navigateur (600 px max.) et compressé (≤ ~150 Ko), conservé dans `tq_logo`. Imprimé dans l'en-tête du PDF. Gratuit pour tous.
+- **Carnet de clients** (`lib/clients.ts`, `components/ClientsPanel.tsx`) : chaque PDF téléchargé ou partagé enregistre le client (nom, adresse, ville, courriel, téléphone) dans `tq_clients`. Suggestions sur le champ « Nom du client » et remplissage automatique. Onglet « Clients » pour rechercher, modifier ou supprimer.
+- **Sauvegarde v3** : inclut le carnet de clients et le logo. Les fichiers v1 et v2 restent importables (en mode « Remplacer », le carnet et le logo actuels sont conservés).
+- **Brouillon** : le document en cours est conservé dans `tq_draft` (plus rien de perdu au rechargement).
+- **Ergonomie** : navigation mobile (onglets), barre fixe Total / Partager / PDF sur mobile, en-têtes de colonnes, champs étiquetés sur mobile, panneau « Votre entreprise » replié une fois rempli, date de validité/échéance imprimée sur le PDF, notes de facture distinctes à la conversion (avec « Réf. : soumission S-… »).

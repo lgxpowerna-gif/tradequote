@@ -7,6 +7,8 @@
  * Version 2 (Oct. 2026): history entries may carry the full document (`doc`, see lib/docs.ts) so old
  * quotes/invoices can be reopened and exported to accounting. Version 1 files (summary-only entries)
  * are still accepted and imported as summary-only entries.
+ * Version 3 (Oct. 2026): adds the client list (`clients`, lib/clients.ts) and the business logo
+ * (`logo`, lib/logo.ts). Version 1 and 2 files are still accepted (no clients, no logo).
  *
  * What is exported: document history, business details (incl. RBQ licence), language, the Stripe
  * subscription id (so Pro carries over; it is re-verified with Stripe on the server at each load)
@@ -18,11 +20,13 @@
  */
 import { isValidSubscriptionId, monthKey } from "./plan";
 import { docKey, sanitizeFullDoc, type DocType, type SavedDoc } from "./docs";
+import { CLIENTS_KEY, mergeClients, sanitizeClients, type SavedClient } from "./clients";
+import { LOGO_KEY, sanitizeLogo, type Logo } from "./logo";
 export type { DocType, SavedDoc };
 
 export const BACKUP_FORMAT = "tradequote-backup";
-export const BACKUP_VERSION = 2;
-export const MAX_BACKUP_BYTES = 5 * 1024 * 1024; // 5 MB
+export const BACKUP_VERSION = 3;
+export const MAX_BACKUP_BYTES = 8 * 1024 * 1024; // 8 MB (history + clients + logo)
 /** History kept in the browser (was 50; raised so merging two devices doesn't silently drop documents). */
 export const MAX_HISTORY = 500;
 export const LAST_EXPORT_KEY = "tq_last_export";
@@ -42,6 +46,8 @@ export type BackupData = {
   langChoice?: boolean;
   sub?: string;
   usage?: { month: string; count: number };
+  clients?: SavedClient[];
+  logo?: Logo;
 };
 export type Backup = { format: typeof BACKUP_FORMAT; app: "TradeQuote"; version: number; exportedAt: string; data: BackupData };
 
@@ -102,6 +108,10 @@ export function buildBackup(get: Getter, now: Date = new Date()): Backup {
   const month = get("tq_count_month");
   const count = parseInt(get("tq_count") ?? "", 10);
   if (month && /^\d{4}-\d{2}$/.test(month) && Number.isFinite(count) && count > 0) data.usage = { month, count };
+  const clients = sanitizeClients(safeJson(get(CLIENTS_KEY)));
+  if (clients.length) data.clients = clients;
+  const logo = sanitizeLogo(safeJson(get(LOGO_KEY)));
+  if (logo) data.logo = logo;
   return { format: BACKUP_FORMAT, app: "TradeQuote", version: BACKUP_VERSION, exportedAt: now.toISOString(), data };
 }
 
@@ -129,6 +139,7 @@ export function parseBackup(text: string, byteSize?: number): ParseResult {
   if (!d || typeof d !== "object" || Array.isArray(d)) return { ok: false, error: "badShape" };
   if (d.history !== undefined && !Array.isArray(d.history)) return { ok: false, error: "badShape" };
   if (d.company !== undefined && (typeof d.company !== "object" || d.company === null || Array.isArray(d.company))) return { ok: false, error: "badShape" };
+  if (d.clients !== undefined && !Array.isArray(d.clients)) return { ok: false, error: "badShape" };
   const { docs, skipped } = sanitizeHistory(d.history);
   const data: BackupData = { history: docs, company: sanitizeCompany(d.company) };
   if (d.lang === "fr" || d.lang === "en") data.lang = d.lang;
@@ -137,6 +148,10 @@ export function parseBackup(text: string, byteSize?: number): ParseResult {
   const u = d.usage as Record<string, unknown> | undefined;
   if (u && typeof u.month === "string" && /^\d{4}-\d{2}$/.test(u.month) && typeof u.count === "number" && Number.isFinite(u.count) && u.count > 0)
     data.usage = { month: u.month, count: Math.floor(u.count) };
+  const clients = sanitizeClients(d.clients);
+  if (clients.length) data.clients = clients;
+  const logo = sanitizeLogo(d.logo);
+  if (logo) data.logo = logo;
   const exportedAt = typeof o.exportedAt === "string" && !isNaN(Date.parse(o.exportedAt)) ? o.exportedAt : "";
   return { ok: true, backup: { format: BACKUP_FORMAT, app: "TradeQuote", version: o.version, exportedAt, data }, skipped };
 }
@@ -193,6 +208,9 @@ export type ImportPlan = {
   added: number;
   duplicates: number;
   upgraded: number;
+  clients: SavedClient[];
+  clientsAdded: number;
+  logo: Logo | null;
 };
 
 /** Computes what an import writes, from the current localStorage (getter) and a parsed backup. */
@@ -233,7 +251,23 @@ export function planImport(get: Getter, backup: Backup, mode: ImportMode, now: D
     set.tq_sub = d.sub; subChanged = true;
     remove.push("tq_pro_confirmed_at"); // belonged to the previous subscription; the server check decides
   }
-  return { set, remove, history, company, lang, count, subChanged, added, duplicates, upgraded };
+  // Client list: merge adds new clients (fills empty fields of existing ones); replace takes the file's.
+  const curClients = sanitizeClients(safeJson(get(CLIENTS_KEY)));
+  const fileClients = d.clients ?? [];
+  // Files older than v3 know nothing about clients/logo: "replace" then keeps this browser's.
+  const v3 = backup.version >= 3;
+  const cm = mode === "replace" && v3 ? { clients: fileClients, added: fileClients.length } : mergeClients(curClients, fileClients);
+  set[CLIENTS_KEY] = JSON.stringify(cm.clients);
+
+  // Logo: merge keeps this browser's logo (takes the file's only if none here); replace takes the file's.
+  const curLogo = sanitizeLogo(safeJson(get(LOGO_KEY)));
+  let logo = curLogo;
+  if (mode === "replace" && v3) logo = d.logo ?? null;
+  else if (!curLogo && d.logo) logo = d.logo;
+  if (logo) { if (logo !== curLogo) set[LOGO_KEY] = JSON.stringify(logo); }
+  else if (curLogo) remove.push(LOGO_KEY);
+
+  return { set, remove, history, company, lang, count, subChanged, added, duplicates, upgraded, clients: cm.clients, clientsAdded: cm.added, logo };
 }
 
 /** Gentle reminder: data older than REMINDER_DAYS and no export (or "later") in the last REMINDER_DAYS. */

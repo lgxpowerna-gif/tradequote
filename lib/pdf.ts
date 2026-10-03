@@ -2,14 +2,17 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { formatRate, type TaxLine } from "./tax";
 import { rbqLine } from "./rbq";
+import { fitLogo, logoFormat, type Logo } from "./logo";
 
 export type PdfArgs = {
   docType: "quote" | "invoice";
   lang: "en" | "fr";
   plan: "free" | "pro";
-  meta: { number: string; date: string; notes: string };
+  meta: { number: string; date: string; notes: string; due?: string };
+  /** Optional business logo (printed in the header). */
+  logo?: Logo | null;
   company: { name: string; address: string; city: string; email: string; phone: string; bn: string; gst: string; qst?: string; rbq?: string; interac: string };
-  client: { name: string; address: string; city: string; email: string };
+  client: { name: string; address: string; city: string; email: string; phone?: string };
   jobSite: string;
   /** Optional job dates (YYYY-MM-DD), printed under the job site. */
   jobDate?: string;
@@ -62,10 +65,20 @@ function buildTradeQuotePDF(a: PdfArgs): jsPDF {
 
   doc.setFillColor(...primary);
   doc.rect(0, 0, w, 26, "F");
+  let titleX = 14;
+  if (a.logo) {
+    try {
+      const box = fitLogo(a.logo, 44, 18);
+      doc.setFillColor(255, 255, 255);
+      doc.roundedRect(10, 4, box.w + 4, box.h + 2, 1.5, 1.5, "F");
+      doc.addImage(a.logo.dataUrl, logoFormat(a.logo), 12, 5, box.w, box.h, undefined, "FAST");
+      titleX = 10 + box.w + 4 + 6;
+    } catch { /* unreadable image: PDF without logo */ }
+  }
   doc.setTextColor(255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
-  doc.text(title, 14, 17);
+  doc.text(title, titleX, 17);
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text(`# ${a.meta.number}`, w - 14, 12, { align: "right" });
@@ -106,9 +119,15 @@ function buildTradeQuotePDF(a: PdfArgs): jsPDF {
     a.client.address,
     a.client.city,
     a.client.email,
+    a.client.phone || "",
     a.jobSite ? `${fr ? "Chantier" : "Site"} : ${a.jobSite}` : "",
     a.jobDate
       ? `${fr ? "Travaux" : "Job date"} : ${a.jobDate}${a.jobEndDate && a.jobEndDate > a.jobDate ? (fr ? " au " : " to ") + a.jobEndDate : ""}`
+      : "",
+    a.meta.due
+      ? a.docType === "quote"
+        ? `${fr ? "Valide jusqu'au" : "Valid until"} : ${a.meta.due}`
+        : `${fr ? "Échéance" : "Due date"} : ${a.meta.due}`
       : "",
   ].filter(Boolean) as string[];
   left.forEach((l, i) => {
