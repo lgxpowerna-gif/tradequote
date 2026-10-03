@@ -27,4 +27,4 @@ Next.js 14, Tailwind, Stripe, jsPDF
 - Roofing template (Toiture)
 - Accounting export (Pro): QuickBooks Online invoice CSV + Excel CSV with GST/QST columns
 - EN / FR
-- Stripe Pro ($9/mo or $79/yr)
+- Stripe Pro ($19/mo or $79/yr; STRIPE_PRICE_MONTHLY must point to the 19 CAD/month price)

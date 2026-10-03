@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: "%s | TradeQuote",
   },
   description:
-    "Soumissions et factures professionnelles en français pour entrepreneurs et gens de métier du Québec : licence RBQ imprimée, TPS 5 % + TVQ 9,975 %, acomptes, historique complet, partage par courriel, agenda, modèle Toiture. Export comptable QuickBooks/Excel avec Pro. Gratuit · Pro 9 $/mois.",
+    "Soumissions et factures professionnelles en français pour entrepreneurs et gens de métier du Québec : licence RBQ imprimée, TPS 5 % + TVQ 9,975 %, acomptes, historique complet, partage par courriel, agenda, modèle Toiture. Export comptable QuickBooks/Excel avec Pro. Gratuit · Pro 19 $/mois.",
   keywords: [
     "contractor quote software Canada",
     "renovation invoice",
@@ -47,7 +47,7 @@ export const metadata: Metadata = {
     siteName: "TradeQuote",
     title: "TradeQuote – Soumissions conformes RBQ avec TPS/TVQ",
     description:
-      "Soumissions, acomptes et factures pour gens de métier. Licence RBQ, TPS/TVQ. Gratuit · Pro 9 $/mois.",
+      "Soumissions, acomptes et factures pour gens de métier. Licence RBQ, TPS/TVQ. Gratuit · Pro 19 $/mois.",
   },
   twitter: {
     card: "summary_large_image",
@@ -66,7 +66,7 @@ const jsonLd = {
   operatingSystem: "Web",
   offers: [
     { "@type": "Offer", price: "0", priceCurrency: "CAD", name: "Free" },
-    { "@type": "Offer", price: "9.00", priceCurrency: "CAD", name: "Pro Monthly" },
+    { "@type": "Offer", price: "19.00", priceCurrency: "CAD", name: "Pro Monthly" },
     { "@type": "Offer", price: "79.00", priceCurrency: "CAD", name: "Pro Yearly" },
   ],
   description:

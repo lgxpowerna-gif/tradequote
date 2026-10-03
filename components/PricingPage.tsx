@@ -3,7 +3,7 @@ import { FREE_LIMIT } from "@/lib/plan";
 import { CheckoutConsent, LegalFooterLinks } from "@/components/LegalLinks";
 
 /** Display prices — must match the Stripe prices behind STRIPE_PRICE_MONTHLY / STRIPE_PRICE_YEARLY. */
-export const PRICE_MONTHLY = 9;
+export const PRICE_MONTHLY = 19;
 export const PRICE_YEARLY = 79;
 
 type PLang = "fr" | "en";
@@ -16,7 +16,7 @@ const COPY = {
     pro: "Pro",
     perMonth: "/mois",
     perYear: "/an",
-    yearlyNote: `ou ${PRICE_YEARLY} $/an — 2 mois gratuits`,
+    yearlyNote: `ou ${PRICE_YEARLY} $/an`,
     taxNote: "Prix en dollars canadiens. Taxes en sus. Paiement sécurisé par Stripe.",
     startFree: "Commencer gratuitement",
     goPro: "Passer à Pro",
@@ -36,7 +36,7 @@ const COPY = {
     pro: "Pro",
     perMonth: "/mo",
     perYear: "/yr",
-    yearlyNote: `or $${PRICE_YEARLY}/yr — 2 months free`,
+    yearlyNote: `or $${PRICE_YEARLY}/yr`,
     taxNote: "Prices in Canadian dollars. Plus applicable taxes. Secure payment by Stripe.",
     startFree: "Start free",
     goPro: "Go Pro",
