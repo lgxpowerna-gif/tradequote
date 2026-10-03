@@ -132,6 +132,8 @@ await test("line printed on documents", () => {
 });
 
 const docsLib = await load("lib/docs.ts");
+const clientsLib = await load("lib/clients.ts");
+const logoLib = await load("lib/logo.ts");
 const backup = await load("lib/backup.ts");
 console.log("backup");
 const store = (o) => (k) => (k in o ? o[k] : null);
@@ -146,7 +148,7 @@ const fullStore = {
 await test("export: version, date, user keys only (no confirmed_at / legacy / last_export)", () => {
   const b = backup.buildBackup(store(fullStore), oct);
   assert.equal(b.format, "tradequote-backup");
-  assert.equal(b.version, 2);
+  assert.equal(b.version, 3);
   assert.equal(b.exportedAt, oct.toISOString());
   assert.equal(b.data.history.length, 2);
   assert.deepEqual(b.data.company, { name: "Rénos Laurier", rbq: "1234-5678-01", gst: "123" });
@@ -178,12 +180,12 @@ await test("parse: clear error codes for invalid files", () => {
   assert.deepEqual(backup.parseBackup("   "), { ok: false, error: "empty" });
   assert.deepEqual(backup.parseBackup("[]"), { ok: false, error: "wrongApp" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ format: "facturepro-backup", version: 1, data: {} })), { ok: false, error: "wrongApp" });
-  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: 3 })), { ok: false, error: "newerVersion" });
+  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: 4 })), { ok: false, error: "newerVersion" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: "1" })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: { history: "x" } })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: { company: [] } })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: null })), { ok: false, error: "badShape" });
-  assert.deepEqual(backup.parseBackup("{}", 6 * 1024 * 1024), { ok: false, error: "tooLarge" });
+  assert.deepEqual(backup.parseBackup("{}", 9 * 1024 * 1024), { ok: false, error: "tooLarge" });
   assert.equal(backup.parseBackup("\uFEFF" + JSON.stringify(ok)).ok, true);
 });
 await test("parse: invalid history entries skipped, bad sub/usage dropped", () => {
@@ -287,7 +289,7 @@ await test("computeTotals: TPS/TVQ on 2 315 $ with 10 % discount and 30 % deposi
 await test("v2 export/parse keeps the full document; v1 summary entries still accepted", () => {
   const h = [fdoc("1790000000003", "F-2026-0001", "2026-10-02"), doc("1790000000001", "S-2026-1001")];
   const b = backup.buildBackup(store({ tq_history: JSON.stringify(h) }), oct);
-  assert.equal(b.version, 2);
+  assert.equal(b.version, 3);
   const r = backup.parseBackup(JSON.stringify(b));
   assert.equal(r.ok, true);
   assert.deepEqual(r.backup.data.history[0].doc.items, h[0].doc.items);
@@ -321,6 +323,101 @@ await test("upsertHistory + nextDocNumber", () => {
   assert.equal(up.isNew, false); assert.equal(up.history.length, 2); assert.equal(up.history[0].id, "1"); assert.equal(up.history[0].date, "2026-10-03");
   const add = docsLib.upsertHistory(h, fdoc("9", "F-2026-0008", "2026-10-03"), 500);
   assert.equal(add.isNew, true); assert.equal(add.history.length, 3);
+});
+
+/* ───────── clients + logo (backup v3) ───────── */
+console.log("clients / logo / backup v3");
+const { clientKey } = clientsLib;
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+await test("clientKey ignores case, accents and spacing", () => {
+  assert.equal(clientKey("  Jean   TRÉMBLAY "), clientKey("jean tremblay"));
+  assert.notEqual(clientKey("Jean Tremblay"), clientKey("Jeanne Tremblay"));
+});
+await test("upsertClient: adds, updates, empty fields never erase, most recent first, skips 'Client'", () => {
+  let l = clientsLib.upsertClient([], { name: "Jean Tremblay", address: "12 rue Principale", city: "Mont-Laurier", email: "jean@example.com", phone: "819-555-0101" }, 1);
+  l = clientsLib.upsertClient(l, { name: "Marie Côté", city: "Ferme-Neuve" }, 2);
+  assert.deepEqual(l.map((c) => c.name), ["Marie Côté", "Jean Tremblay"]);
+  const id = l[1].id;
+  l = clientsLib.upsertClient(l, { name: "jean tremblay", address: "", phone: "819-555-9999" }, 3);
+  assert.equal(l.length, 2); assert.equal(l[0].id, id); assert.equal(l[0].name, "jean tremblay");
+  assert.equal(l[0].address, "12 rue Principale"); assert.equal(l[0].phone, "819-555-9999"); assert.equal(l[0].updatedAt, 3);
+  assert.equal(clientsLib.upsertClient(l, { name: "  " }).length, 2);
+  assert.equal(clientsLib.upsertClient(l, { name: "Client" }).length, 2);
+  assert.equal(clientsLib.findClient(l, "MARIE COTE").city, "Ferme-Neuve");
+  assert.equal(clientsLib.findClient(l, ""), undefined);
+});
+await test("sanitizeClients: junk dropped, duplicates removed, capped", () => {
+  const l = clientsLib.sanitizeClients([{ name: "A", phone: 5 }, null, { name: "" }, { name: "a " }, "x", { name: "B", email: "b@x.ca", evil: 1 }]);
+  assert.deepEqual(l.map((c) => c.name), ["A", "B"]);
+  assert.equal(l[0].phone, ""); assert.equal(l[1].evil, undefined);
+  assert.deepEqual(clientsLib.sanitizeClients("x"), []);
+  assert.equal(clientsLib.sanitizeClients(Array.from({ length: clientsLib.MAX_CLIENTS + 5 }, (_, i) => ({ name: "C" + i }))).length, clientsLib.MAX_CLIENTS);
+});
+await test("mergeClients: adds new ones, fills only empty fields", () => {
+  const cur = clientsLib.sanitizeClients([{ id: "1", name: "Jean Tremblay", phone: "", email: "ici@x.ca" }]);
+  const inc = clientsLib.sanitizeClients([{ id: "9", name: "JEAN TREMBLAY", phone: "819", email: "fichier@x.ca" }, { id: "2", name: "Marie" }]);
+  const m = clientsLib.mergeClients(cur, inc);
+  assert.equal(m.added, 1); assert.equal(m.clients.length, 2);
+  assert.equal(m.clients[0].phone, "819"); assert.equal(m.clients[0].email, "ici@x.ca"); assert.equal(m.clients[0].id, "1");
+});
+await test("logo: only PNG/JPEG data URLs within the size limit", () => {
+  assert.deepEqual(logoLib.sanitizeLogo({ dataUrl: PNG, w: 1, h: 1 }), { dataUrl: PNG, w: 1, h: 1 });
+  assert.equal(logoLib.sanitizeLogo({ dataUrl: PNG.replace("png", "svg+xml"), w: 1, h: 1 }), null);
+  assert.equal(logoLib.sanitizeLogo({ dataUrl: "javascript:alert(1)", w: 1, h: 1 }), null);
+  assert.equal(logoLib.sanitizeLogo({ dataUrl: PNG, w: 0, h: 1 }), null);
+  assert.equal(logoLib.sanitizeLogo({ dataUrl: "data:image/png;base64," + "A".repeat(logoLib.MAX_LOGO_CHARS), w: 1, h: 1 }), null);
+  assert.equal(logoLib.logoFormat({ dataUrl: PNG, w: 1, h: 1 }), "PNG");
+  assert.equal(logoLib.logoFormat({ dataUrl: "data:image/jpeg;base64,AAAA", w: 1, h: 1 }), "JPEG");
+});
+await test("logo: resize target (never upscaled) and fit in the PDF box", () => {
+  assert.deepEqual(logoLib.resizeTarget(2400, 1200), { w: 600, h: 300 });
+  assert.deepEqual(logoLib.resizeTarget(300, 900), { w: 200, h: 600 });
+  assert.deepEqual(logoLib.resizeTarget(120, 80), { w: 120, h: 80 });
+  assert.deepEqual(logoLib.fitLogo({ w: 600, h: 300 }, 40, 24), { w: 40, h: 20 });
+  assert.deepEqual(logoLib.fitLogo({ w: 100, h: 200 }, 40, 24), { w: 12, h: 24 });
+});
+const v3Store = { tq_clients: JSON.stringify([{ id: "c1", name: "Jean Tremblay", address: "12 rue Principale", city: "Mont-Laurier", email: "jean@example.com", phone: "819-555-0101", updatedAt: 1 }]), tq_logo: JSON.stringify({ dataUrl: PNG, w: 1, h: 1 }) };
+await test("backup v3: clients + logo exported and parsed back", () => {
+  const b = backup.buildBackup(store(v3Store), oct);
+  assert.equal(b.version, 3);
+  assert.equal(b.data.clients[0].phone, "819-555-0101");
+  assert.equal(b.data.logo.dataUrl, PNG);
+  const r = backup.parseBackup(JSON.stringify(b));
+  assert.equal(r.ok, true); assert.deepEqual(r.backup.data, b.data);
+  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...b, data: { clients: "x" } })), { ok: false, error: "badShape" });
+  const bad = backup.parseBackup(JSON.stringify({ ...b, data: { logo: { dataUrl: "data:text/html;base64,AAAA", w: 1, h: 1 } } }));
+  assert.equal(bad.ok, true); assert.equal(bad.backup.data.logo, undefined);
+});
+await test("import v3: merge adds clients and keeps the current logo; replace takes the file's", () => {
+  const file = backup.parseBackup(JSON.stringify(backup.buildBackup(store(v3Store), oct))).backup;
+  const otherLogo = JSON.stringify({ dataUrl: "data:image/jpeg;base64,AAAA", w: 2, h: 2 });
+  const cur = store({ tq_clients: JSON.stringify([{ id: "x", name: "Marie Côté" }]), tq_logo: otherLogo });
+  const m = backup.planImport(cur, file, "merge", oct);
+  assert.equal(m.clientsAdded, 1); assert.deepEqual(m.clients.map((c) => c.name), ["Marie Côté", "Jean Tremblay"]);
+  assert.equal(m.logo.w, 2); assert.equal(m.set.tq_logo, undefined);
+  assert.equal(JSON.parse(m.set.tq_clients).length, 2);
+  const rp = backup.planImport(cur, file, "replace", oct);
+  assert.deepEqual(rp.clients.map((c) => c.name), ["Jean Tremblay"]); assert.equal(rp.logo.dataUrl, PNG);
+  assert.equal(JSON.parse(rp.set.tq_logo).dataUrl, PNG);
+  // file without a logo in replace mode removes it; empty browser takes the file's logo on merge
+  const noLogo = backup.parseBackup(JSON.stringify(backup.buildBackup(store({ tq_clients: v3Store.tq_clients }), oct))).backup;
+  assert.ok(backup.planImport(cur, noLogo, "replace", oct).remove.includes("tq_logo"));
+  assert.equal(backup.planImport(store({}), file, "merge", oct).logo.dataUrl, PNG);
+});
+await test("import v1/v2 files: still accepted, replace keeps this browser's clients and logo", () => {
+  const cur = store(v3Store);
+  for (const version of [1, 2]) {
+    const f = backup.parseBackup(JSON.stringify({ format: "tradequote-backup", version, exportedAt: "2026-09-01T00:00:00Z", data: { history: [doc("5", "S-2026-0005")], company: { name: "Vieux" } } }));
+    assert.equal(f.ok, true);
+    const p = backup.planImport(cur, f.backup, "replace", oct);
+    assert.deepEqual(p.clients.map((c) => c.name), ["Jean Tremblay"]); assert.equal(p.logo.dataUrl, PNG);
+    assert.ok(!p.remove.includes("tq_logo")); assert.equal(p.history.length, 1); assert.equal(p.company.name, "Vieux");
+  }
+});
+await test("client phone kept in full documents", () => {
+  const d = docsLib.sanitizeFullDoc({ ...full(), client: { name: "Jean", phone: "819-555-0101" } });
+  assert.equal(d.client.phone, "819-555-0101");
+  assert.equal(docsLib.sanitizeFullDoc({ ...full(), client: { name: "Jean" } }).client.phone, "");
 });
 
 console.log("accounting export");

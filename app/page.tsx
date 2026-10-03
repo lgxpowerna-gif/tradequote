@@ -12,13 +12,22 @@ import { BACKUP_SNOOZE_KEY, LAST_EXPORT_KEY, MAX_HISTORY, exportReminderDue, loc
 import { computeTotals, docKey, nextDocNumber, upsertHistory, type FullDoc, type SavedDoc } from "@/lib/docs";
 import { buildIcs, googleCalendarUrl, icsFileName, isYmd, mailtoLink, shareBody, shareSubject, type ScheduleInput } from "@/lib/schedule";
 import { AccountingExport } from "@/components/AccountingExport";
+import { LogoPicker } from "@/components/LogoPicker";
+import { ClientsPanel } from "@/components/ClientsPanel";
+import { CLIENTS_KEY, findClient, sanitizeClients, upsertClient, type SavedClient } from "@/lib/clients";
+import { LOGO_KEY, sanitizeLogo, type Logo } from "@/lib/logo";
+import { sanitizeFullDoc } from "@/lib/docs";
 
+/** Default quote validity: 30 days (matches the default notes). */
+const in30 = () => { const d = new Date(); d.setDate(d.getDate() + 30); return localDate(d); };
 const NOTES = { fr: "Soumission valide 30 jours. Paiement à la réception de la facture. Merci de votre confiance.", en: "Quote valid for 30 days. Payment due on receipt of invoice. Thank you." };
+const DRAFT_KEY = "tq_draft";
 
-type Plan="free"|"pro"; type DocType="quote"|"invoice"; type View="app"|"pricing"|"history";
+type Plan="free"|"pro"; type DocType="quote"|"invoice"; type View="app"|"pricing"|"history"|"clients";
 type Item={id:number;description:string;quantity:number;unitPrice:number};
 type Saved=SavedDoc;
-const EMPTY_CLIENT={name:"",address:"",city:"",email:""};
+const EMPTY_CLIENT={name:"",address:"",city:"",email:"",phone:""};
+const VIEWS:View[]=["app","history","clients","pricing"];
 const EMPTY_COMPANY={name:"",address:"",city:"",email:"",phone:"",bn:"",gst:"",qst:"",rbq:"",interac:""};
 
 export default function Home(){
@@ -42,6 +51,11 @@ export default function Home(){
   /** docKey of the history entry reopened with "Ouvrir" (its number may be re-saved for another client name). */
   const [openedKey,setOpenedKey]=useState<string|null>(null);
   const [storageErr,setStorageErr]=useState(false);
+  const [clients,setClients]=useState<SavedClient[]>([]);
+  const [logo,setLogo]=useState<Logo|null>(null);
+  /** "Votre entreprise" panel: open until the business name is filled (decided after mount). */
+  const [bizOpen,setBizOpen]=useState(true);
+  const [ready,setReady]=useState(false);
   const t=i18n[lang];
   const [company,setCompany]=useState(EMPTY_COMPANY);
   const [lastExport,setLastExport]=useState<number|null>(null);
@@ -60,11 +74,27 @@ export default function Home(){
     setCount(c); setHistory(hist); if(co)setCompany(prev=>({...prev,...JSON.parse(co)}));
     const en=l==="en"&&localStorage.getItem("tq_lang_choice")==="1";
     if(en)setLang("en");
-    setMeta(m=>({...m,notes:en?NOTES.en:m.notes,number:nextDocNumber(hist,"quote",en?"en":"fr"),date:localDate()}));
-    const qv=new URLSearchParams(window.location.search).get("view"); if(qv==="pricing"||qv==="history")setView(qv);
+    setMeta(m=>({...m,notes:en?NOTES.en:m.notes,number:nextDocNumber(hist,"quote",en?"en":"fr"),date:localDate(),due:in30()}));
+    const qv=new URLSearchParams(window.location.search).get("view"); if(qv==="pricing"||qv==="history"||qv==="clients")setView(qv);
+    setClients(sanitizeClients(JSON.parse(localStorage.getItem(CLIENTS_KEY)||"[]")));
+    setLogo(sanitizeLogo(JSON.parse(localStorage.getItem(LOGO_KEY)||"null")));
+    if(co&&(JSON.parse(co)?.name||"").trim())setBizOpen(false);
+    // Unsaved document in progress (survives a reload / the phone closing the tab).
+    const dr=JSON.parse(localStorage.getItem(DRAFT_KEY)||"null");
+    const dd=dr?sanitizeFullDoc(dr.doc):undefined;
+    if(dd&&(dr.type==="quote"||dr.type==="invoice")&&typeof dr.number==="string"&&dr.number){
+      setDocType(dr.type); setClient({...EMPTY_CLIENT,...dd.client}); setJobSite(dd.jobSite); setJobDate(dd.jobDate); setJobEndDate(dd.jobEndDate);
+      if(dd.items.length)setItems(dd.items.map((it,i)=>({id:i+1,...it})));
+      setTaxPreset(dd.taxPreset); setCustomRate(dd.customRate); setDiscountPct(dd.discountPct); setDepositPct(dd.depositPct);
+      setOpenedKey(typeof dr.openedKey==="string"?dr.openedKey:null);
+      setMeta(m=>({...m,number:dr.number.slice(0,100),date:typeof dr.date==="string"&&dr.date?dr.date:m.date,due:dd.due,notes:dd.notes}));
+    }
     const le=parseInt(localStorage.getItem(LAST_EXPORT_KEY)||"",10); if(le>0)setLastExport(le);
     setReminder(exportReminderDue({lastExport:localStorage.getItem(LAST_EXPORT_KEY),snoozedAt:localStorage.getItem(BACKUP_SNOOZE_KEY),history:hist}));
-  }catch{ setMeta(m=>m.number?m:{...m,number:nextDocNumber([],"quote","fr"),date:localDate()}); }},[]);
+  }catch{ setMeta(m=>m.number?m:{...m,number:nextDocNumber([],"quote","fr"),date:localDate(),due:in30()}); } setReady(true); },[]);
+
+  useEffect(()=>{ if(!ready)return; try{localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));}catch{setStorageErr(true);} },[clients,ready]);
+  useEffect(()=>{ if(!ready)return; try{ if(logo)localStorage.setItem(LOGO_KEY,JSON.stringify(logo)); else localStorage.removeItem(LOGO_KEY);}catch{setStorageErr(true);} },[logo,ready]);
 
   /* Pro is confirmed with Stripe on the server at every load; localStorage "tq_plan" is ignored. */
   const checkSub=useCallback(async(subId:string)=>{
@@ -124,7 +154,7 @@ export default function Home(){
   const tpl=(id:string)=>{const x=TEMPLATES.find(t=>t.id===id); if(!x)return; setItems(x.items.map((it,i)=>({id:Date.now()+i,description:it.description[lang],quantity:it.quantity,unitPrice:it.unitPrice}))); flash(t.tplLoaded,3500);};
   const flash=(msg:string,ms=2500)=>{setToast(msg); setTimeout(()=>setToast(null),ms);};
   const labels={description:t.description,qty:t.qty,rate:t.rate,subtotal:t.subtotal,total:t.total,depositAmt:t.depositAmt,balance:t.balance,discount:t.discount};
-  const argsFor=(type:DocType,m:{number:string;date:string;notes:string},d:FullDoc):PdfArgs=>({docType:type,lang,plan,meta:{number:m.number,date:m.date,notes:m.notes},company,client:d.client,jobSite:d.jobSite,jobDate:d.jobDate,jobEndDate:d.jobEndDate,items:d.items,subtotal:d.subtotal,discountPct:d.discountPct,discountAmount:d.discountAmount,taxLines:d.taxLines,total:d.total,depositPct:d.depositPct,depositAmt:d.depositAmt,balance:d.balance,labels});
+  const argsFor=(type:DocType,m:{number:string;date:string;notes:string},d:FullDoc):PdfArgs=>({docType:type,lang,plan,meta:{number:m.number,date:m.date,notes:m.notes,due:d.due},logo,company,client:d.client,jobSite:d.jobSite,jobDate:d.jobDate,jobEndDate:d.jobEndDate,items:d.items,subtotal:d.subtotal,discountPct:d.discountPct,discountAmount:d.discountAmount,taxLines:d.taxLines,total:d.total,depositPct:d.depositPct,depositAmt:d.depositAmt,balance:d.balance,labels});
   const currentDoc=():FullDoc=>({client:{...client},jobSite,jobDate,jobEndDate,due:meta.due,notes:meta.notes,items:items.map(({description,quantity,unitPrice})=>({description,quantity,unitPrice})),taxPreset,customRate,discountPct,depositPct,...totals});
 
   /**
@@ -145,6 +175,7 @@ export default function Home(){
     const date=meta.date||localDate();
     const r=upsertHistory(history,{id:String(Date.now()),type:docType,number,clientName:client.name||"Client",total:doc.total,date,doc,updatedAt:Date.now()},MAX_HISTORY);
     setHistory(r.history);
+    setClients(cs=>upsertClient(cs,client));
     if(isNew)setCount(c=>c+1);
     if(number!==meta.number||date!==meta.date)setMeta(m=>({...m,number,date}));
     setOpenedKey(docKey({type:docType,number}));
@@ -184,7 +215,7 @@ export default function Home(){
     const x=d.doc;
     setDocType(d.type);
     const number=mode==="open"?d.number:nextDocNumber(history,d.type,lang);
-    setMeta({number,date:mode==="open"?d.date:localDate(),due:mode==="open"?x.due:"",notes:x.notes});
+    setMeta({number,date:mode==="open"?d.date:localDate(),due:mode==="open"?x.due:d.type==="quote"?in30():"",notes:x.notes});
     setClient({...EMPTY_CLIENT,...x.client}); setJobSite(x.jobSite); setJobDate(mode==="open"?x.jobDate:""); setJobEndDate(mode==="open"?x.jobEndDate:"");
     setItems(x.items.length?x.items.map((it,i)=>({id:Date.now()+i,...it})):[{id:Date.now(),description:"",quantity:1,unitPrice:0}]);
     setTaxPreset(x.taxPreset); setCustomRate(x.customRate); setDiscountPct(x.discountPct); setDepositPct(x.depositPct);
@@ -194,21 +225,41 @@ export default function Home(){
   };
   const reprint=(d:Saved)=>{ if(d.doc)generateTradeQuotePDF(argsFor(d.type,{number:d.number,date:d.date,notes:d.doc.notes},d.doc)); };
   const newDoc=()=>{
-    setDocType("quote"); setMeta(m=>({...m,number:nextDocNumber(history,"quote",lang),date:localDate(),due:""}));
+    setDocType("quote"); setMeta(m=>({...m,number:nextDocNumber(history,"quote",lang),date:localDate(),due:in30()}));
     setClient(EMPTY_CLIENT); setJobSite(""); setJobDate(""); setJobEndDate(""); setItems([{id:Date.now(),description:"",quantity:1,unitPrice:0}]);
     setDiscountPct(0); setDepositPct(0); setOpenedKey(null);
+    setMeta(m=>({...m,notes:NOTES[lang]}));
+  };
+  /** Client name typed or picked from the suggestions: fill the empty fields from the saved client. */
+  const onClientName=(name:string)=>{
+    const found=findClient(clients,name);
+    if(found&&found.name===name){
+      setClient(c=>({name,address:c.address||found.address,city:c.city||found.city,email:c.email||found.email,phone:c.phone||found.phone}));
+      if(found.address&&!jobSite)setJobSite([found.address,found.city].filter(Boolean).join(", "));
+    } else setClient(c=>({...c,name}));
+  };
+  const startForClient=(c:SavedClient)=>{
+    newDoc(); setClient({name:c.name,address:c.address,city:c.city,email:c.email,phone:c.phone});
+    setView("app"); window.scrollTo({top:0});
   };
   const exportData=()=>{try{setLastExport(downloadBackup(lang)); setReminder(false); flash(t.backupExported);}catch{flash(t.errRead);}};
   const snoozeReminder=()=>{try{localStorage.setItem(BACKUP_SNOOZE_KEY,String(Date.now()));}catch{} setReminder(false);};
   const onImported=(p:ImportPlan,summary:string)=>{
     setHistory(p.history);
+    setClients(p.clients); setLogo(p.logo);
     setCompany({...EMPTY_COMPANY,...p.company});
     setCount(p.count);
     if(p.lang&&p.lang!==lang){const nl=p.lang; setMeta(m=>m.notes===NOTES[lang]?{...m,notes:NOTES[nl]}:m); setLang(nl);}
     if(p.subChanged){const sub=localStorage.getItem("tq_sub"); if(isValidSubscriptionId(sub)){setLegacyPro(false); checkSub(sub);}}
     flash(summary,4000);
   };
-  const toInv=()=>{setDocType("invoice"); setOpenedKey(null); setMeta(m=>({...m,number:nextDocNumber(history,"invoice",lang),date:localDate()}));};
+  const toInv=()=>{
+    const ref=`${t.refQuote} ${meta.number}`;
+    setDocType("invoice"); setOpenedKey(null);
+    // The quote's default terms ("Soumission valide 30 jours…") don't belong on an invoice.
+    setMeta(m=>({...m,number:nextDocNumber(history,"invoice",lang),date:localDate(),due:"",notes:`${m.notes.trim()===NOTES[lang]||!m.notes.trim()?t.invoiceNotes:m.notes}\n${ref}`}));
+    flash(`${t.invoice} ${nextDocNumber(history,"invoice",lang)} ✓`);
+  };
   const switchType=(ty:DocType)=>{ if(ty===docType)return; setDocType(ty); setOpenedKey(null); setMeta(m=>({...m,number:nextDocNumber(history,ty,lang)})); };
   const upgrade=async(mode:"monthly"|"yearly")=>{
     setLoading(true);
@@ -217,6 +268,9 @@ export default function Home(){
       const d=await r.json(); if(d.url)window.location.href=d.url; else{alert(d.error||"Error"); setLoading(false);}
     }catch{alert("Network error"); setLoading(false);}
   };
+  useEffect(()=>{ if(!ready||!meta.number)return; try{
+    localStorage.setItem(DRAFT_KEY,JSON.stringify({type:docType,number:meta.number,date:meta.date,openedKey,doc:{client,jobSite,jobDate,jobEndDate,due:meta.due,notes:meta.notes,items:items.map(({description,quantity,unitPrice})=>({description,quantity,unitPrice})),taxPreset,customRate,discountPct,depositPct}}));
+  }catch{} },[ready,docType,meta,openedKey,client,jobSite,jobDate,jobEndDate,items,taxPreset,customRate,discountPct,depositPct]);
   const inp="w-full border rounded-lg px-3 py-2 text-sm";
 
   return(
@@ -228,9 +282,9 @@ export default function Home(){
             <div className="hidden sm:block"><div className="font-bold text-sm">{t.brand}</div><div className="text-[10px] text-slate-500">{plan==="pro"?t.pro:t.free}</div></div>
           </div>
           <nav className="hidden md:flex gap-1">
-            {(["app","history","pricing"] as View[]).map(v=>(
+            {VIEWS.map(v=>(
               <button key={v} onClick={()=>setView(v)} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${view===v?"bg-slate-100":"text-slate-600 hover:bg-slate-50"}`}>
-                {v==="app"?t.create:v==="history"?t.history:t.pricing}
+                {v==="app"?t.create:v==="history"?t.history:v==="clients"?t.clients:t.pricing}
               </button>
             ))}
           </nav>
@@ -240,6 +294,13 @@ export default function Home(){
               :<span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">{t.pro}</span>}
           </div>
         </div>
+        <nav className="md:hidden grid grid-cols-4 border-t text-xs" aria-label="Navigation">
+          {VIEWS.map(v=>(
+            <button key={v} onClick={()=>{setView(v); window.scrollTo({top:0});}} className={`py-2.5 font-medium ${view===v?"text-blue-700 border-b-2 border-blue-600":"text-slate-600"}`} data-testid={`mnav-${v}`}>
+              {v==="app"?t.create:v==="history"?t.history:v==="clients"?t.clients:t.pricing}
+            </button>
+          ))}
+        </nav>
       </header>
 
       {showUp&&(
@@ -288,8 +349,7 @@ export default function Home(){
         {view==="history"&&(
           <div>
             <h2 className="text-2xl font-bold mb-6">{t.history}</h2>
-            <BackupPanel lang={lang} t={t} lastExport={lastExport} onExport={exportData} onImported={onImported}/>
-            <AccountingExport lang={lang} t={t} history={history} pro={plan==="pro"} onUpgrade={()=>setView("pricing")} onDone={msg=>flash(msg)}/>
+            <div className="mb-6">
             {history.length===0?(
               <div className="bg-white border rounded-2xl p-12 text-center text-slate-500">
                 <p className="mb-3">{t.noDocs}</p>
@@ -299,18 +359,18 @@ export default function Home(){
               <div className="bg-white border rounded-2xl overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-slate-600"><tr>
-                    <th className="text-left px-4 py-3">{t.typeCol}</th><th className="text-left px-4 py-3">#</th>
-                    <th className="text-left px-4 py-3">{t.client}</th><th className="text-left px-4 py-3">{t.date}</th>
-                    <th className="text-right px-4 py-3">{t.total}</th>
-                    <th className="text-right px-4 py-3">{t.actions}</th>
+                    <th className="hidden sm:table-cell text-left px-4 py-3">{t.typeCol}</th><th className="text-left px-3 sm:px-4 py-3">#</th>
+                    <th className="text-left px-3 sm:px-4 py-3">{t.client}</th><th className="hidden sm:table-cell text-left px-4 py-3">{t.date}</th>
+                    <th className="text-right px-3 sm:px-4 py-3">{t.total}</th>
+                    <th className="text-right px-3 sm:px-4 py-3">{t.actions}</th>
                   </tr></thead>
                   <tbody>{history.map(d=>(
                     <tr key={d.id} className="border-t">
-                      <td className="px-4 py-3">{d.type==="quote"?t.quote:t.invoice}</td><td className="px-4 py-3 font-medium">{d.number}</td>
-                      <td className="px-4 py-3">{d.clientName}</td><td className="px-4 py-3 text-slate-500">{d.date}</td>
-                      <td className="px-4 py-3 text-right font-medium">{money(d.total)}</td>
-                      <td className="px-4 py-3 text-right whitespace-nowrap">{d.doc?(
-                        <span className="inline-flex gap-2 text-xs">
+                      <td className="hidden sm:table-cell px-4 py-3">{d.type==="quote"?t.quote:t.invoice}</td><td className="px-3 sm:px-4 py-3 font-medium whitespace-nowrap">{d.number}</td>
+                      <td className="px-3 sm:px-4 py-3">{d.clientName}<div className="sm:hidden text-[11px] text-slate-500">{d.date}</div></td><td className="hidden sm:table-cell px-4 py-3 text-slate-500">{d.date}</td>
+                      <td className="px-3 sm:px-4 py-3 text-right font-medium whitespace-nowrap">{money(d.total)}</td>
+                      <td className="px-3 sm:px-4 py-3 text-right sm:whitespace-nowrap">{d.doc?(
+                        <span className="inline-flex flex-col sm:flex-row items-end gap-2 text-xs">
                           <button onClick={()=>loadDoc(d,"open")} className="text-blue-600 font-medium hover:underline">{t.open}</button>
                           <button onClick={()=>loadDoc(d,"duplicate")} className="text-blue-600 hover:underline">{t.duplicate}</button>
                           <button onClick={()=>reprint(d)} className="text-blue-600 hover:underline">{t.pdf}</button>
@@ -321,7 +381,17 @@ export default function Home(){
                 </table>
               </div>
             )}
+            </div>
+            <BackupPanel lang={lang} t={t} lastExport={lastExport} onExport={exportData} onImported={onImported}/>
+            <AccountingExport lang={lang} t={t} history={history} pro={plan==="pro"} onUpgrade={()=>setView("pricing")} onDone={msg=>flash(msg)}/>
           </div>
+        )}
+
+        {view==="clients"&&(
+          <ClientsPanel t={t} clients={clients}
+            onSave={c=>setClients(cs=>cs.map(x=>x.id===c.id?c:x))}
+            onDelete={id=>setClients(cs=>cs.filter(x=>x.id!==id))}
+            onNewQuote={startForClient}/>
         )}
 
         {view==="app"&&(
@@ -336,12 +406,12 @@ export default function Home(){
               <span className="flex gap-3 whitespace-nowrap"><button onClick={exportData} className="font-semibold underline">{t.backupNow}</button><button onClick={snoozeReminder} className="text-amber-700">{t.backupLater}</button></span>
             </div>}
             <div className="lg:col-span-2 space-y-4">
-              <div className="flex gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button onClick={()=>switchType("quote")} className={`px-4 py-2 rounded-lg text-sm font-semibold ${docType==="quote"?"bg-blue-600 text-white":"bg-white border text-slate-600"}`}>{t.quote}</button>
                 <button onClick={()=>switchType("invoice")} className={`px-4 py-2 rounded-lg text-sm font-semibold ${docType==="invoice"?"bg-blue-600 text-white":"bg-white border text-slate-600"}`}>{t.invoice}</button>
                 <button onClick={newDoc} className="px-3 py-2 rounded-lg text-sm font-medium bg-white border text-slate-600 hover:bg-slate-50" data-testid="new-doc">{t.newDoc}</button>
-                {existing&&<span className="self-center text-[11px] bg-amber-50 text-amber-800 border border-amber-200 rounded-full px-2 py-0.5">{t.editing} {existing.number}</span>}
-                {docType==="quote"&&<button onClick={toInv} className="ml-auto text-sm text-blue-600 font-medium hover:underline">{t.convert} →</button>}
+                {docType==="quote"&&<button onClick={toInv} className="sm:ml-auto text-sm text-blue-600 font-medium hover:underline px-1 py-2" data-testid="convert">{t.convert} →</button>}
+                {existing&&<span className="basis-full sm:basis-auto text-[11px] text-amber-800" data-testid="editing">✏️ {t.editing} {existing.number}</span>}
               </div>
               <div className="bg-white border rounded-xl p-4">
                 <div className="text-sm font-semibold mb-2">{t.templates}</div>
@@ -351,7 +421,18 @@ export default function Home(){
               </div>
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="bg-white border rounded-xl p-4 space-y-2">
-                  <div className="font-semibold text-sm mb-2">{t.business}</div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="font-semibold text-sm">{t.business}</div>
+                    {!bizOpen&&<button type="button" onClick={()=>setBizOpen(true)} className="text-xs text-blue-600 hover:underline" data-testid="biz-edit">{t.bizEdit}</button>}
+                  </div>
+                  {!bizOpen?(
+                    <div className="text-sm text-slate-600 flex items-center gap-3">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {logo&&<img src={logo.dataUrl} alt="" className="h-10 max-w-[6rem] object-contain"/>}
+                      <div className="min-w-0"><div className="font-medium text-slate-800 truncate">{company.name}</div>
+                      <div className="text-xs text-slate-500 truncate">{[company.city,rbqOk?rbqLine(company.rbq,lang):"",company.phone].filter(Boolean).join(" · ")}</div></div>
+                    </div>
+                  ):(<>
                   <input placeholder={t.companyName} value={company.name} onChange={e=>setCompany({...company,name:e.target.value})} className={inp}/>
                   <input placeholder={t.address} value={company.address} onChange={e=>setCompany({...company,address:e.target.value})} className={inp}/>
                   <input placeholder={t.city} value={company.city} onChange={e=>setCompany({...company,city:e.target.value})} className={inp}/>
@@ -365,15 +446,21 @@ export default function Home(){
                     <p className={`text-[11px] mt-1 ${company.rbq&&!rbqOk?"text-red-600":"text-slate-400"}`}>{company.rbq&&!rbqOk?t.rbqInvalid:t.rbqHint}</p>
                   </div>
                   <input placeholder={t.interac} value={company.interac} onChange={e=>setCompany({...company,interac:e.target.value})} className={inp}/>
-                  <button type="button" onClick={()=>{setView("history"); window.scrollTo({top:0});}} className="text-xs text-blue-600 hover:underline pt-1">💾 {t.backupLink} →</button>
+                  <LogoPicker t={t} logo={logo} onChange={l=>{setLogo(l); if(l)flash(t.logoSaved);}}/>
+                  {company.name.trim()&&<button type="button" onClick={()=>setBizOpen(false)} className="text-xs text-blue-600 hover:underline">✓ {t.save}</button>}
+                  </>)}
+                  <button type="button" onClick={()=>{setView("history"); window.scrollTo({top:0});}} className="block text-xs text-blue-600 hover:underline pt-1">💾 {t.backupLink} →</button>
                 </div>
                 <div className="bg-white border rounded-xl p-4 space-y-2">
                   <div className="font-semibold text-sm mb-2">{t.client}</div>
-                  <input placeholder={t.clientName} value={client.name} onChange={e=>setClient({...client,name:e.target.value})} className={inp}/>
-                  <input placeholder={t.address} value={client.address} onChange={e=>setClient({...client,address:e.target.value})} className={inp}/>
-                  <input placeholder={t.city} value={client.city} onChange={e=>setClient({...client,city:e.target.value})} className={inp}/>
-                  <input placeholder={t.email} value={client.email} onChange={e=>setClient({...client,email:e.target.value})} className={inp}/>
-                  <input placeholder={t.jobSite} value={jobSite} onChange={e=>setJobSite(e.target.value)} className={inp}/>
+                  <input placeholder={t.clientName} value={client.name} onChange={e=>onClientName(e.target.value)} list="tq-clients" autoComplete="off" className={inp} data-testid="client-name"/>
+                  <datalist id="tq-clients">{clients.map(c=><option key={c.id} value={c.name}>{[c.city,c.phone].filter(Boolean).join(" · ")}</option>)}</datalist>
+                  {clients.length>0&&!client.name&&<p className="text-[11px] text-slate-400 -mt-1">{t.clientSuggest}</p>}
+                  <input placeholder={t.address} value={client.address} onChange={e=>setClient({...client,address:e.target.value})} className={inp} data-testid="client-address"/>
+                  <input placeholder={t.city} value={client.city} onChange={e=>setClient({...client,city:e.target.value})} className={inp} data-testid="client-city"/>
+                  <input type="email" placeholder={t.email} value={client.email} onChange={e=>setClient({...client,email:e.target.value})} className={inp} data-testid="client-email"/>
+                  <input type="tel" placeholder={t.phone} value={client.phone} onChange={e=>setClient({...client,phone:e.target.value})} className={inp} data-testid="client-phone"/>
+                  <input placeholder={t.jobSite} value={jobSite} onChange={e=>setJobSite(e.target.value)} className={inp} data-testid="job-site"/>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="text-[11px] text-slate-500">{t.jobDate}<input type="date" value={jobDate} onChange={e=>setJobDate(e.target.value)} className={inp} data-testid="job-date"/></label>
                     <label className="text-[11px] text-slate-500">{t.jobEndDate}<input type="date" value={jobEndDate} min={jobDate||undefined} onChange={e=>setJobEndDate(e.target.value)} className={inp} data-testid="job-end-date"/></label>
@@ -383,27 +470,33 @@ export default function Home(){
               <div className="bg-white border rounded-xl p-4">
                 <div className="font-semibold text-sm mb-3">{t.details}</div>
                 <div className="grid sm:grid-cols-3 gap-3">
-                  <div><label className="text-xs text-slate-500">{t.docNumber}</label><input value={meta.number} onChange={e=>setMeta({...meta,number:e.target.value})} className={inp}/></div>
+                  <div><label className="text-xs text-slate-500">{t.docNumber}</label><input value={meta.number} onChange={e=>setMeta({...meta,number:e.target.value})} className={inp} data-testid="doc-number"/></div>
                   <div><label className="text-xs text-slate-500">{t.date}</label><input type="date" value={meta.date} onChange={e=>setMeta({...meta,date:e.target.value})} className={inp}/></div>
-                  <div><label className="text-xs text-slate-500">{t.validUntil}</label><input type="date" value={meta.due} onChange={e=>setMeta({...meta,due:e.target.value})} className={inp}/></div>
+                  <div><label className="text-xs text-slate-500">{docType==="quote"?t.validQuote:t.dueInvoice}</label><input type="date" value={meta.due} onChange={e=>setMeta({...meta,due:e.target.value})} className={inp}/></div>
                 </div>
               </div>
               <div className="bg-white border rounded-xl p-4">
                 <div className="flex justify-between mb-3"><div className="font-semibold text-sm">{t.items}</div>
                   <button onClick={add} className="text-sm text-blue-600 font-medium">{t.addItem}</button></div>
-                <div className="space-y-2">{items.map(item=>(
-                  <div key={item.id} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
-                    <input placeholder={t.description} value={item.description} onChange={e=>upd(item.id,"description",e.target.value)} className={`flex-1 ${inp}`}/>
-                    <input type="number" min={0} step={0.01} value={item.quantity} onChange={e=>upd(item.id,"quantity",+e.target.value||0)} className="w-20 border rounded-lg px-3 py-2 text-sm"/>
-                    <input type="number" min={0} step={0.01} value={item.unitPrice} onChange={e=>upd(item.id,"unitPrice",+e.target.value||0)} className="w-28 border rounded-lg px-3 py-2 text-sm"/>
-                    <div className="w-24 text-right text-sm font-medium">{money(item.quantity*item.unitPrice)}</div>
-                    <button onClick={()=>rm(item.id)} className="text-slate-400 hover:text-red-500">✕</button>
+                <div className="hidden sm:flex gap-2 text-[11px] uppercase text-slate-400 font-semibold px-1 mb-1">
+                  <span className="flex-1">{t.description}</span><span className="w-20">{t.qty}</span><span className="w-28">{t.rate}</span><span className="w-24 text-right">{t.lineTotal}</span><span className="w-4"/>
+                </div>
+                <div className="space-y-3 sm:space-y-2">{items.map(item=>(
+                  <div key={item.id} className="grid grid-cols-[4.5rem_1fr_auto_auto] sm:flex gap-2 items-center border-b sm:border-0 pb-3 sm:pb-0" data-testid="line">
+                    <input placeholder={t.description} value={item.description} onChange={e=>upd(item.id,"description",e.target.value)} className={`col-span-4 sm:flex-1 ${inp}`} data-testid="line-desc"/>
+                    <label className="sm:contents"><span className="sm:hidden text-[10px] text-slate-400 block">{t.qty}</span>
+                    <input type="number" inputMode="decimal" min={0} step={0.01} value={item.quantity||""} placeholder="0" onChange={e=>upd(item.id,"quantity",+e.target.value||0)} className="w-full sm:w-20 border rounded-lg px-3 py-2 text-sm" data-testid="line-qty"/></label>
+                    <label className="sm:contents"><span className="sm:hidden text-[10px] text-slate-400 block">{t.rate}</span>
+                    <input type="number" inputMode="decimal" min={0} step={0.01} value={item.unitPrice||""} placeholder="0,00" onChange={e=>upd(item.id,"unitPrice",+e.target.value||0)} className="w-full sm:w-28 border rounded-lg px-3 py-2 text-sm" data-testid="line-price"/></label>
+                    <div className="self-end sm:self-auto pb-2 sm:pb-0 w-24 text-right text-sm font-medium">{money(item.quantity*item.unitPrice)}</div>
+                    <button onClick={()=>rm(item.id)} className="self-end sm:self-auto pb-2 sm:pb-0 text-slate-400 hover:text-red-500 w-4" aria-label={t.del}>✕</button>
                   </div>
                 ))}</div>
+                <button onClick={add} className="mt-3 text-sm text-blue-600 font-medium">{t.addItem}</button>
               </div>
               <div className="bg-white border rounded-xl p-4">
                 <div className="font-semibold text-sm mb-2">{t.notes}</div>
-                <textarea rows={2} value={meta.notes} onChange={e=>setMeta({...meta,notes:e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm resize-none"/>
+                <textarea rows={2} data-testid="notes" value={meta.notes} onChange={e=>setMeta({...meta,notes:e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm resize-none"/>
               </div>
             </div>
             <div className="space-y-4">
@@ -472,8 +565,15 @@ export default function Home(){
           </div>
         )}
       </main>
-      {toast&&<div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium animate-fade-in">{toast}</div>}
-      <footer className="border-t mt-12 py-8 text-center text-sm text-slate-500">
+      {view==="app"&&<div className="lg:hidden fixed bottom-0 inset-x-0 z-20 bg-white/95 backdrop-blur border-t px-4 py-2 flex items-center justify-between gap-3" data-testid="mobile-bar">
+        <div className="text-sm"><div className="text-[10px] text-slate-500 uppercase">{t.total}</div><div className="font-bold text-blue-700">{money(total)}</div></div>
+        <div className="flex gap-2">
+          <button onClick={share} className="border border-blue-600 text-blue-700 rounded-lg px-3 py-2 text-sm font-semibold" aria-label={t.share} data-testid="mbar-share">📤</button>
+          <button onClick={download} data-testid="mbar-download" className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${limited&&!existing?"bg-amber-500":"bg-blue-600"}`}>{limited&&!existing?t.upgrade:t.download}</button>
+        </div>
+      </div>}
+      {toast&&<div className="fixed bottom-20 lg:bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium animate-fade-in">{toast}</div>}
+      <footer className={`border-t mt-12 py-8 text-center text-sm text-slate-500 ${view==="app"?"pb-24 lg:pb-8":""}`}>
         <p className="font-medium text-slate-700">{t.brand}</p>
         <p>{t.footer}</p>
         <LegalFooterLinks lang={lang} className="mt-2"/>

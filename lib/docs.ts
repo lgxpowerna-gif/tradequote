@@ -13,7 +13,7 @@ export const MAX_ITEMS = 200;
 const MAX_STR = 1000;
 
 export type DocItem = { description: string; quantity: number; unitPrice: number };
-export type DocClient = { name: string; address: string; city: string; email: string };
+export type DocClient = { name: string; address: string; city: string; email: string; phone?: string };
 
 /** Complete document as stored in history (amounts are the ones printed on the PDF). */
 export type FullDoc = {
@@ -86,7 +86,7 @@ export function sanitizeFullDoc(v: unknown): FullDoc | undefined {
       })
     : [];
   return {
-    client: { name: str(c.name, 300), address: str(c.address, 300), city: str(c.city, 300), email: str(c.email, 300) },
+    client: { name: str(c.name, 300), address: str(c.address, 300), city: str(c.city, 300), email: str(c.email, 300), phone: str(c.phone, 60) },
     jobSite: str(o.jobSite, 300),
     jobDate: ymd(o.jobDate),
     jobEndDate: ymd(o.jobEndDate),

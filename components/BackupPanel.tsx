@@ -65,6 +65,7 @@ export function BackupPanel({ lang, t, lastExport, onExport, onImported }: {
       const parts = [`${docs(plan.added)} ${one(plan.added) ? t.importAddedOne : t.importAdded}`];
       if (plan.duplicates) parts.push(`${plan.duplicates} ${t.importDup}`);
       if (plan.upgraded) parts.push(`${plan.upgraded} ${t.importUpgraded}`);
+      if (plan.clientsAdded) parts.push(`${plan.clientsAdded} ${t.clientsCount}`);
       if (pending.skipped) parts.push(`${pending.skipped} ${t.importSkipped}`);
       onImported(plan, `${t.importDone} (${parts.join(", ")})`);
       setPending(null);
@@ -100,6 +101,8 @@ export function BackupPanel({ lang, t, lastExport, onExport, onImported }: {
               {pending.backup.exportedAt && <li>{t.importFileInfo} {fmtDate(Date.parse(pending.backup.exportedAt))}</li>}
               <li><strong>{d.history.length}</strong> {one(d.history.length) ? t.importDoc : t.importDocs}</li>
               {d.company.name && <li>{t.importCompany} : <strong>{d.company.name}</strong></li>}
+              {!!d.clients?.length && <li><strong>{d.clients.length}</strong> {t.clientsCount}</li>}
+              {d.logo && <li>{t.logoTitle} ✓</li>}
               {d.sub && <li className="text-slate-500 text-xs">{t.importHasSub}</li>}
             </ul>
             <button type="button" onClick={() => apply("merge")} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-semibold">{t.importMerge}</button>
