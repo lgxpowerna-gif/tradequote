@@ -67,7 +67,7 @@ const jsonLd = {
   offers: [
     { "@type": "Offer", price: "0", priceCurrency: "CAD", name: "Free" },
     { "@type": "Offer", price: "19.00", priceCurrency: "CAD", name: "Pro Monthly" },
-    { "@type": "Offer", price: "79.00", priceCurrency: "CAD", name: "Pro Yearly" },
+    { "@type": "Offer", price: "190.00", priceCurrency: "CAD", name: "Pro Yearly" },
   ],
   description:
     "Logiciel de soumissions et factures pour entrepreneurs et gens de métier du Québec (RBQ, TPS/TVQ).",
