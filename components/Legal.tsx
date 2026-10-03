@@ -122,7 +122,7 @@ export function TermsPage({ lang }: { lang: L }) {
         <p>{BRAND} lets you create {BRAND === "TradeQuote" ? "quotes and invoices" : "invoices"} as PDFs. The free plan allows 5 documents per month with a watermark. The Pro plan removes these limits and adds the accounting export (CSV files for QuickBooks Online and spreadsheets). Imported files must be checked in your accounting software; you remain responsible for your bookkeeping.</p>
         <h2>3. Pro subscription</h2>
         <ul>
-          <li>Price: <strong>$9 CAD per month</strong> (or $79 CAD per year), plus applicable taxes, paid by card through Stripe.</li>
+          <li>Price: <strong>$19 CAD per month</strong> (or $190 CAD per year), plus applicable taxes, paid by card through Stripe. This price applies to subscriptions started on or after October 3, 2026; existing subscribers keep the price they signed up at until notified as described below.</li>
           <li>The subscription renews automatically at the end of each period until cancelled.</li>
           <li>We will give at least 30 days' notice by email before any price change.</li>
         </ul>
@@ -151,7 +151,7 @@ export function TermsPage({ lang }: { lang: L }) {
       <p>{BRAND} permet de créer {BRAND === "TradeQuote" ? "des soumissions et des factures" : "des factures"} en PDF. Le forfait gratuit permet 5 documents par mois, avec filigrane. Le forfait Pro retire ces limites et ajoute l'export comptable (fichiers CSV pour QuickBooks en ligne et pour tableur). Vérifiez les données importées dans votre logiciel comptable ; vous demeurez responsable de votre comptabilité.</p>
       <h2>3. Abonnement Pro</h2>
       <ul>
-        <li>Prix : <strong>9 $ CA par mois</strong> (ou 79 $ CA par année), taxes applicables en sus, payé par carte via Stripe.</li>
+        <li>Prix : <strong>19 $ CA par mois</strong> (ou 190 $ CA par année), taxes applicables en sus, payé par carte via Stripe. Ce prix s'applique aux abonnements souscrits à compter du 3 octobre 2026 ; les abonnés existants conservent le prix de leur abonnement jusqu'à un avis donné comme indiqué ci-dessous.</li>
         <li>L'abonnement se renouvelle automatiquement à la fin de chaque période jusqu'à son annulation.</li>
         <li>Toute modification de prix sera annoncée par courriel au moins 30 jours à l'avance.</li>
       </ul>
