@@ -3,6 +3,7 @@ import autoTable from "jspdf-autotable";
 import { formatRate, type TaxLine } from "./tax";
 import { rbqLine } from "./rbq";
 import { fitLogo, logoFormat, type Logo } from "./logo";
+import { printableItems } from "./docs";
 
 export type PdfArgs = {
   docType: "quote" | "invoice";
@@ -142,7 +143,7 @@ function buildTradeQuotePDF(a: PdfArgs): jsPDF {
   autoTable(doc, {
     startY,
     head: [[a.labels.description, a.labels.qty, a.labels.rate, a.labels.subtotal]],
-    body: a.items.map((i) => [
+    body: printableItems(a.items).map((i) => [
       i.description || "—",
       String(i.quantity),
       formatMoney(i.unitPrice),

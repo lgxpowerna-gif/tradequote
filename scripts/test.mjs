@@ -134,6 +134,7 @@ await test("line printed on documents", () => {
 const docsLib = await load("lib/docs.ts");
 const clientsLib = await load("lib/clients.ts");
 const logoLib = await load("lib/logo.ts");
+const statusLib = await load("lib/status.ts");
 const backup = await load("lib/backup.ts");
 console.log("backup");
 const store = (o) => (k) => (k in o ? o[k] : null);
@@ -148,7 +149,7 @@ const fullStore = {
 await test("export: version, date, user keys only (no confirmed_at / legacy / last_export)", () => {
   const b = backup.buildBackup(store(fullStore), oct);
   assert.equal(b.format, "tradequote-backup");
-  assert.equal(b.version, 3);
+  assert.equal(b.version, 4);
   assert.equal(b.exportedAt, oct.toISOString());
   assert.equal(b.data.history.length, 2);
   assert.deepEqual(b.data.company, { name: "Rénos Laurier", rbq: "1234-5678-01", gst: "123" });
@@ -180,7 +181,7 @@ await test("parse: clear error codes for invalid files", () => {
   assert.deepEqual(backup.parseBackup("   "), { ok: false, error: "empty" });
   assert.deepEqual(backup.parseBackup("[]"), { ok: false, error: "wrongApp" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ format: "facturepro-backup", version: 1, data: {} })), { ok: false, error: "wrongApp" });
-  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: 4 })), { ok: false, error: "newerVersion" });
+  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: 5 })), { ok: false, error: "newerVersion" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: "1" })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: { history: "x" } })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: { company: [] } })), { ok: false, error: "badShape" });
@@ -289,7 +290,7 @@ await test("computeTotals: TPS/TVQ on 2 315 $ with 10 % discount and 30 % deposi
 await test("v2 export/parse keeps the full document; v1 summary entries still accepted", () => {
   const h = [fdoc("1790000000003", "F-2026-0001", "2026-10-02"), doc("1790000000001", "S-2026-1001")];
   const b = backup.buildBackup(store({ tq_history: JSON.stringify(h) }), oct);
-  assert.equal(b.version, 3);
+  assert.equal(b.version, 4);
   const r = backup.parseBackup(JSON.stringify(b));
   assert.equal(r.ok, true);
   assert.deepEqual(r.backup.data.history[0].doc.items, h[0].doc.items);
@@ -379,7 +380,7 @@ await test("logo: resize target (never upscaled) and fit in the PDF box", () => 
 const v3Store = { tq_clients: JSON.stringify([{ id: "c1", name: "Jean Tremblay", address: "12 rue Principale", city: "Mont-Laurier", email: "jean@example.com", phone: "819-555-0101", updatedAt: 1 }]), tq_logo: JSON.stringify({ dataUrl: PNG, w: 1, h: 1 }) };
 await test("backup v3: clients + logo exported and parsed back", () => {
   const b = backup.buildBackup(store(v3Store), oct);
-  assert.equal(b.version, 3);
+  assert.equal(b.version, 4);
   assert.equal(b.data.clients[0].phone, "819-555-0101");
   assert.equal(b.data.logo.dataUrl, PNG);
   const r = backup.parseBackup(JSON.stringify(b));
@@ -466,6 +467,91 @@ await test("Excel CSV (fr): BOM, ';' separator, ',' decimals, TPS/TVQ columns ad
   assert.equal(row2[0], "Soumission"); assert.equal(row2[1], "'=HYPERLINK(1)");
   const en = accounting.buildSheetCsv([d], "en").slice(1).split("\r\n")[1].split(",");
   assert.ok(en.includes("115.75") && en.includes("2661.67"));
+});
+
+console.log("statuses / lines at 0 $ / backup v4");
+await test("printableItems drops empty 0 $ lines only; zeroLines finds described 0 $ lines", () => {
+  const items = [{ description: "", quantity: 1, unitPrice: 0 }, { description: "  ", quantity: 0, unitPrice: 0 }, { description: "Solins", quantity: 1, unitPrice: 0 }, { description: "", quantity: 2, unitPrice: 10 }, { description: "Bardeaux", quantity: 0, unitPrice: 42.5 }, { description: "Pose", quantity: 16, unitPrice: 65 }];
+  assert.deepEqual(docsLib.printableItems(items).map((i) => i.description), ["Solins", "", "Bardeaux", "Pose"]);
+  assert.deepEqual(docsLib.zeroLines(items).map((i) => i.description), ["Solins", "Bardeaux"]);
+  assert.deepEqual(docsLib.zeroLines([{ description: "x", quantity: 1, unitPrice: 0.001 }]).length, 1);
+});
+await test("statuses per type, labels, default 'sent' for old entries", () => {
+  assert.deepEqual(statusLib.statusesFor("quote"), ["draft", "sent", "accepted", "refused"]);
+  assert.deepEqual(statusLib.statusesFor("invoice"), ["sent", "paid"]);
+  assert.equal(statusLib.statusOf({ type: "quote" }), "sent");
+  assert.equal(statusLib.statusOf({ type: "invoice", status: "accepted" }), "sent");
+  assert.equal(statusLib.statusOf({ type: "quote", status: "refused" }), "refused");
+  assert.equal(statusLib.STATUS_LABELS.fr.accepted, "Acceptée"); assert.equal(statusLib.STATUS_LABELS.fr.paid, "Payée");
+});
+await test("statusAfterSave: new quote downloaded = draft, shared = sent, existing kept", () => {
+  assert.equal(statusLib.statusAfterSave(undefined, "quote", "download"), "draft");
+  assert.equal(statusLib.statusAfterSave(undefined, "quote", "share"), "sent");
+  assert.equal(statusLib.statusAfterSave(undefined, "invoice", "download"), "sent");
+  assert.equal(statusLib.statusAfterSave({ type: "quote", status: "draft" }, "quote", "share"), "sent");
+  assert.equal(statusLib.statusAfterSave({ type: "quote", status: "accepted" }, "quote", "download"), "accepted");
+  assert.equal(statusLib.statusAfterSave({ type: "quote" }, "quote", "download"), "sent");
+  assert.equal(statusLib.statusAfterSave({ type: "invoice", status: "paid" }, "invoice", "share"), "paid");
+});
+await test("setStatus: paid sets/keeps the payment date, other statuses clear it, invalid ignored", () => {
+  const h = [{ ...doc("1", "F-1", "2026-10-01", "invoice") }, { ...doc("2", "S-1") }];
+  let x = statusLib.setStatus(h, "1", "paid", "2026-10-03");
+  assert.equal(x[0].status, "paid"); assert.equal(x[0].paidAt, "2026-10-03");
+  x = statusLib.setStatus(x, "1", "paid", "2026-10-09", "2026-10-05");
+  assert.equal(x[0].paidAt, "2026-10-05");
+  x = statusLib.setStatus(x, "1", "paid", "2026-10-09");
+  assert.equal(x[0].paidAt, "2026-10-05");
+  x = statusLib.setStatus(x, "1", "sent", "2026-10-09");
+  assert.equal(x[0].status, "sent"); assert.equal("paidAt" in x[0], false);
+  assert.equal(statusLib.setStatus(x, "2", "paid", "2026-10-09")[1].status, undefined);
+  assert.equal(statusLib.setStatus(x, "2", "accepted", "2026-10-09")[1].status, "accepted");
+});
+await test("filters", () => {
+  const h = [{ type: "quote", status: "accepted" }, { type: "quote" }, { type: "invoice", status: "paid" }, { type: "invoice" }];
+  assert.equal(h.filter((d) => statusLib.matchesFilter(d, "all")).length, 4);
+  assert.equal(h.filter((d) => statusLib.matchesFilter(d, "quote:accepted")).length, 1);
+  assert.equal(h.filter((d) => statusLib.matchesFilter(d, "quote:sent")).length, 1);
+  assert.equal(h.filter((d) => statusLib.matchesFilter(d, "invoice:sent")).length, 1);
+  assert.equal(h.filter((d) => statusLib.matchesFilter(d, "invoice")).length, 2);
+});
+await test("upsertHistory keeps the status chosen in the history when re-saved without one", () => {
+  const h = [{ ...fdoc("1", "F-2026-0001", "2026-10-01"), status: "paid", paidAt: "2026-10-02" }];
+  const up = docsLib.upsertHistory(h, fdoc("9", "F-2026-0001", "2026-10-03"), 500);
+  assert.equal(up.history[0].status, "paid"); assert.equal(up.history[0].paidAt, "2026-10-02");
+  const up2 = docsLib.upsertHistory(h, { ...fdoc("9", "F-2026-0001", "2026-10-03"), status: "paid" }, 500);
+  assert.equal(up2.history[0].paidAt, "2026-10-02");
+});
+await test("backup v4: status + paidAt round trip, junk dropped, v3 file without status accepted", () => {
+  const h = [{ ...fdoc("1", "F-2026-0001", "2026-10-01"), status: "paid", paidAt: "2026-10-02" }, { ...doc("2", "S-2026-0001"), status: "refused" }, { ...doc("3", "S-2026-0002"), status: "paid", paidAt: "x" }, { ...doc("4", "F-2026-0002", "2026-10-01", "invoice"), status: "sent", paidAt: "2026-10-02" }];
+  const b = backup.buildBackup(store({ tq_history: JSON.stringify(h) }), oct);
+  assert.equal(b.version, 4);
+  const r = backup.parseBackup(JSON.stringify(b));
+  const hs = r.backup.data.history;
+  assert.equal(hs[0].status, "paid"); assert.equal(hs[0].paidAt, "2026-10-02");
+  assert.equal(hs[1].status, "refused");
+  assert.equal(hs[2].status, undefined); assert.equal(hs[2].paidAt, undefined);
+  assert.equal(hs[3].status, "sent"); assert.equal(hs[3].paidAt, undefined);
+  const v3 = backup.parseBackup(JSON.stringify({ format: "tradequote-backup", version: 3, exportedAt: "2026-10-01T00:00:00Z", data: { history: [doc("5", "S-2026-0005")] } }));
+  assert.equal(v3.ok, true); assert.equal(v3.backup.data.history[0].status, undefined);
+});
+await test("merge: a status from the file fills an entry without one; this browser's status wins", () => {
+  const cur = [doc("1", "S-2026-0001"), { ...doc("2", "S-2026-0002"), status: "refused" }];
+  const inc = [{ ...doc("1", "S-2026-0001"), status: "accepted" }, { ...doc("2", "S-2026-0002"), status: "accepted" }];
+  const m = backup.mergeHistory(cur, inc);
+  assert.equal(m.history.find((d) => d.id === "1").status, "accepted");
+  assert.equal(m.history.find((d) => d.id === "2").status, "refused");
+});
+await test("Excel CSV: Statut and Date de paiement columns", () => {
+  const paid = { ...fdoc("1", "F-2026-0001", "2026-10-02"), status: "paid", paidAt: "2026-10-05" };
+  const csv = accounting.buildSheetCsv([paid, fdoc("2", "F-2026-0002", "2026-10-03"), { ...fdoc("3", "S-2026-0001", "2026-10-03", "quote"), status: "accepted" }], "fr");
+  const [head, r1, r2, r3] = csv.slice(1).trimEnd().split("\r\n").map((l) => l.split(";"));
+  const st = head.indexOf("Statut"), pd = head.indexOf("Date de paiement");
+  assert.ok(st > 0 && pd === st + 1);
+  assert.deepEqual([r1[st], r1[pd]], ["Payée", "2026-10-05"]);
+  assert.deepEqual([r2[st], r2[pd]], ["Envoyée", ""]);
+  assert.equal(r3[st], "Acceptée");
+  const en = accounting.buildSheetCsv([paid], "en").slice(1).split("\r\n");
+  assert.ok(en[0].endsWith("Status,Payment date") && en[1].endsWith("Paid,2026-10-05"));
 });
 
 console.log("share / calendar");

@@ -16,6 +16,7 @@
  */
 import { round2 } from "./tax";
 import type { FullDoc, SavedDoc } from "./docs";
+import { STATUS_LABELS, statusOf } from "./status";
 
 export const QBO_MAX_INVOICES = 100;
 export const QBO_MAX_ROWS = 1000;
@@ -120,8 +121,8 @@ export function buildQboCsv(docs: FullSaved[], opts: QboOptions): { csv: string;
 
 export type SheetLang = "fr" | "en";
 const SHEET_HEADERS: Record<SheetLang, string[]> = {
-  fr: ["Type", "Numéro", "Date", "Échéance", "Client", "Courriel client", "Adresse du chantier", "Date des travaux", "Sous-total", "Remise", "Montant avant taxes", "TPS", "TVQ", "TVH", "Autre taxe (TVP/TVD)", "Total des taxes", "Total", "Acompte demandé", "Solde dû", "Taxes appliquées"],
-  en: ["Type", "Number", "Date", "Due date", "Client", "Client email", "Job site", "Job date", "Subtotal", "Discount", "Pre-tax amount", "GST", "QST", "HST", "Other tax (PST/RST)", "Total tax", "Total", "Deposit requested", "Balance due", "Taxes applied"],
+  fr: ["Type", "Numéro", "Date", "Échéance", "Client", "Courriel client", "Adresse du chantier", "Date des travaux", "Sous-total", "Remise", "Montant avant taxes", "TPS", "TVQ", "TVH", "Autre taxe (TVP/TVD)", "Total des taxes", "Total", "Acompte demandé", "Solde dû", "Taxes appliquées", "Statut", "Date de paiement"],
+  en: ["Type", "Number", "Date", "Due date", "Client", "Client email", "Job site", "Job date", "Subtotal", "Discount", "Pre-tax amount", "GST", "QST", "HST", "Other tax (PST/RST)", "Total tax", "Total", "Deposit requested", "Balance due", "Taxes applied", "Status", "Payment date"],
 };
 
 /** Per-document totals split by tax (TPS = gst, TVQ = qst, TVH = hst, anything else = other). */
@@ -147,6 +148,7 @@ export function buildSheetCsv(docs: FullSaved[], lang: SheetLang): string {
       typeLabel(d.type), noFormula(d.number), d.date, doc.due, noFormula(doc.client.name || d.clientName), noFormula(doc.client.email),
       noFormula(doc.jobSite), doc.jobDate, n(doc.subtotal), n(doc.discountAmount), n(pretax), n(s.gst), n(s.qst), n(s.hst), n(s.other),
       n(s.totalTax), n(doc.total), n(doc.depositAmt), n(doc.balance), applied,
+      STATUS_LABELS[lang][statusOf(d)], statusOf(d) === "paid" ? d.paidAt ?? "" : "",
     ]);
   }
   return "\uFEFF" + csvRows(rows, sep);

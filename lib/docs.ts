@@ -9,6 +9,8 @@
 import { computeTaxes, round2, type TaxLine } from "./tax";
 
 export type DocType = "quote" | "invoice";
+/** History status (lib/status.ts): quotes draft/sent/accepted/refused, invoices sent/paid. */
+export type DocStatus = "draft" | "sent" | "accepted" | "refused" | "paid";
 export const MAX_ITEMS = 200;
 const MAX_STR = 1000;
 
@@ -49,7 +51,20 @@ export type SavedDoc = {
   doc?: FullDoc;
   /** Last time the entry was saved (ms). */
   updatedAt?: number;
+  /** Status shown in the history (absent on entries saved by older versions). */
+  status?: DocStatus;
+  /** Payment date YYYY-MM-DD when an invoice is marked paid. */
+  paidAt?: string;
 };
+
+/** Lines printed on the PDF: lines with no description AND a 0 $ amount are left out. */
+export function printableItems<T extends DocItem>(items: T[]): T[] {
+  return items.filter((i) => i.description.trim() !== "" || i.quantity * i.unitPrice !== 0);
+}
+/** Lines with a description whose amount is 0 $ (e.g. template lines not priced yet). */
+export function zeroLines<T extends DocItem>(items: T[]): T[] {
+  return items.filter((i) => i.description.trim() !== "" && round2(i.quantity * i.unitPrice) === 0);
+}
 
 const str = (v: unknown, max = MAX_STR) => (typeof v === "string" ? v.slice(0, max) : "");
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -119,7 +134,11 @@ export function upsertHistory(history: SavedDoc[], entry: SavedDoc, max: number)
   if (i < 0) return { history: [entry, ...history].slice(0, max), isNew: true };
   const prev = history[i];
   const sameClient = prev.clientName.trim().toLowerCase() === entry.clientName.trim().toLowerCase();
-  const next = [{ ...entry, id: prev.id }, ...history.slice(0, i), ...history.slice(i + 1)];
+  const merged: SavedDoc = { ...entry, id: prev.id };
+  // Status chosen in the history is kept when the document is downloaded again.
+  if (!merged.status && prev.status && prev.type === entry.type) merged.status = prev.status;
+  if (!merged.paidAt && prev.paidAt && merged.status === "paid") merged.paidAt = prev.paidAt;
+  const next = [merged, ...history.slice(0, i), ...history.slice(i + 1)];
   return { history: next.slice(0, max), isNew: !sameClient };
 }
 
