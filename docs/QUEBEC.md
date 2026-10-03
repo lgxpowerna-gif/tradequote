@@ -27,3 +27,10 @@
 - **Sauvegarde v3** : inclut le carnet de clients et le logo. Les fichiers v1 et v2 restent importables (en mode « Remplacer », le carnet et le logo actuels sont conservés).
 - **Brouillon** : le document en cours est conservé dans `tq_draft` (plus rien de perdu au rechargement).
 - **Ergonomie** : navigation mobile (onglets), barre fixe Total / Partager / PDF sur mobile, en-têtes de colonnes, champs étiquetés sur mobile, panneau « Votre entreprise » replié une fois rempli, date de validité/échéance imprimée sur le PDF, notes de facture distinctes à la conversion (avec « Réf. : soumission S-… »).
+
+## Ajouts (3 octobre 2026, suite 2) — statuts, lignes à 0 $, configuration initiale
+- **Lignes à 0 $** : les lignes sans description ET à 0 $ ne sont jamais imprimées. Les lignes avec une description à 0 $ déclenchent un avertissement (« X ligne(s) à 0 $ ») au-dessus des lignes et avant le téléchargement ou le partage : les retirer ou les garder. Bouton « Retirer les lignes à 0 $ » et bouton ✕ (36 px sur téléphone) sur chaque ligne.
+- **Statuts dans l'Historique** (`lib/status.ts`) : soumissions Brouillon / Envoyée / Acceptée / Refusée ; factures Envoyée / Payée (avec date de paiement). Une soumission seulement téléchargée = Brouillon, partagée = Envoyée ; facture = Envoyée. Filtre par statut. Anciennes entrées sans statut = Envoyée.
+- **Sauvegarde v4** : statut et date de paiement inclus ; fichiers v1 à v3 toujours importables. **CSV Excel** : colonnes « Statut » et « Date de paiement ».
+- **Configuration initiale** (`components/Onboarding.tsx`) : 3 étapes (entreprise + RBQ, TPS/TVQ + logo facultatifs, modèle de métier), possible de passer, jamais réaffichée (`tq_onboarded`). Jamais montrée si un nom d'entreprise, un document ou un abonnement existe, ni après l'import d'une sauvegarde.
+- **Divers** : message de confirmation intégré à la barre du bas (téléphone) et à l'en-tête de l'aperçu (ordinateur), au lieu de flotter sur le contenu ; étapes claires pour joindre le PDF quand le partage direct n'est pas offert ; icône du site (favicon, icône Apple).

@@ -9,6 +9,8 @@
  * are still accepted and imported as summary-only entries.
  * Version 3 (Oct. 2026): adds the client list (`clients`, lib/clients.ts) and the business logo
  * (`logo`, lib/logo.ts). Version 1 and 2 files are still accepted (no clients, no logo).
+ * Version 4 (Oct. 2026): history entries can carry a `status` (and `paidAt` for paid invoices,
+ * lib/status.ts). Older files are still accepted (entries without a status are shown as "sent").
  *
  * What is exported: document history, business details (incl. RBQ licence), language, the Stripe
  * subscription id (so Pro carries over; it is re-verified with Stripe on the server at each load)
@@ -22,10 +24,11 @@ import { isValidSubscriptionId, monthKey } from "./plan";
 import { docKey, sanitizeFullDoc, type DocType, type SavedDoc } from "./docs";
 import { CLIENTS_KEY, mergeClients, sanitizeClients, type SavedClient } from "./clients";
 import { LOGO_KEY, sanitizeLogo, type Logo } from "./logo";
+import { sanitizeStatus } from "./status";
 export type { DocType, SavedDoc };
 
 export const BACKUP_FORMAT = "tradequote-backup";
-export const BACKUP_VERSION = 3;
+export const BACKUP_VERSION = 4;
 export const MAX_BACKUP_BYTES = 8 * 1024 * 1024; // 8 MB (history + clients + logo)
 /** History kept in the browser (was 50; raised so merging two devices doesn't silently drop documents). */
 export const MAX_HISTORY = 500;
@@ -75,6 +78,7 @@ export function sanitizeDoc(v: unknown): SavedDoc | null {
   const doc = sanitizeFullDoc(o.doc);
   if (doc) out.doc = doc;
   if (typeof o.updatedAt === "number" && Number.isFinite(o.updatedAt)) out.updatedAt = o.updatedAt;
+  Object.assign(out, sanitizeStatus(type, o.status, o.paidAt));
   return out;
 }
 
@@ -178,6 +182,11 @@ export function mergeHistory(current: SavedDoc[], incoming: SavedDoc[]): { histo
       if (d.doc) {
         const i = out.findIndex((x) => x.id === d.id || (d.number.trim() && docKey(x) === docKey(d)));
         if (i >= 0 && !out[i].doc && docKey(out[i]) === docKey(d)) { out[i] = { ...out[i], doc: d.doc }; upgraded++; }
+      }
+      // A status set on the other device fills an entry that has none here (this browser's status wins).
+      if (d.status) {
+        const i = out.findIndex((x) => x.id === d.id || (d.number.trim() && docKey(x) === docKey(d)));
+        if (i >= 0 && !out[i].status && out[i].type === d.type) out[i] = { ...out[i], status: d.status, ...(d.paidAt ? { paidAt: d.paidAt } : {}) };
       }
       continue;
     }

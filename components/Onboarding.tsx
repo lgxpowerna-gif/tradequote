@@ -1,0 +1,88 @@
+"use client";
+import { useState } from "react";
+import { TEMPLATES, type i18n, type Lang } from "@/lib/i18n";
+import { formatRbq, isValidRbq } from "@/lib/rbq";
+import type { Logo } from "@/lib/logo";
+import { LogoPicker } from "@/components/LogoPicker";
+
+type T = (typeof i18n)[Lang];
+type Biz = { name: string; rbq: string; gst: string; qst: string };
+
+/** Key set once the first-run setup is finished or skipped: it is never shown again. */
+export const ONBOARDED_KEY = "tq_onboarded";
+
+/**
+ * Short first-run setup (3 steps, skippable): business name + RBQ, then TPS/TVQ numbers and logo
+ * (optional), then a trade template. Only shown to new users (no business name, no document).
+ */
+export function Onboarding({ t, lang, biz, onBiz, logo, onLogo, onClose }: {
+  t: T;
+  lang: Lang;
+  biz: Biz;
+  onBiz: (b: Partial<Biz>) => void;
+  logo: Logo | null;
+  onLogo: (l: Logo | null) => void;
+  /** template = id of the chosen trade template, null = no template; done = false when skipped. */
+  onClose: (r: { done: boolean; template: string | null }) => void;
+}) {
+  const [step, setStep] = useState(1);
+  const inp = "w-full border rounded-lg px-3 py-2.5 text-sm";
+  const rbqBad = !!biz.rbq && !isValidRbq(biz.rbq);
+  const titles = [t.ob1Title, t.ob2Title, t.ob3Title];
+  return (
+    <div className="fixed inset-0 z-40 bg-black/40 flex items-end sm:items-center justify-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="onb-title" data-testid="onb">
+      <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-xl p-5 sm:p-6 max-h-[92vh] overflow-y-auto">
+        <div className="flex items-center justify-between gap-3 mb-1">
+          <div className="text-xs font-medium text-blue-700">{t.obTitle} · {t.obStep} {step} {t.obOf} 3</div>
+          <button type="button" onClick={() => onClose({ done: false, template: null })} className="text-xs text-slate-500 hover:underline" data-testid="onb-skip">{t.obSkip}</button>
+        </div>
+        <div className="flex gap-1 mb-4" aria-hidden="true">{[1, 2, 3].map((i) => <div key={i} className={`h-1 flex-1 rounded ${i <= step ? "bg-blue-600" : "bg-slate-200"}`} />)}</div>
+        <h2 id="onb-title" className="text-xl font-bold mb-1">{titles[step - 1]}</h2>
+
+        {step === 1 && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">{t.ob1Text}</p>
+            <label className="block text-xs text-slate-600">{t.companyName}
+              <input autoFocus value={biz.name} onChange={(e) => onBiz({ name: e.target.value })} className={inp} data-testid="onb-name" />
+            </label>
+            <label className="block text-xs text-slate-600">{t.rbq}
+              <input inputMode="numeric" value={biz.rbq} onChange={(e) => onBiz({ rbq: formatRbq(e.target.value) })} className={`${inp} ${rbqBad ? "border-red-400" : ""}`} aria-invalid={rbqBad} data-testid="onb-rbq" />
+            </label>
+            <p className={`text-[11px] ${rbqBad ? "text-red-600" : "text-slate-400"}`}>{rbqBad ? t.rbqInvalid : t.rbqHint}</p>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">{t.ob2Text}</p>
+            <div className="grid sm:grid-cols-2 gap-3">
+              <label className="block text-xs text-slate-600">{t.gst}<input value={biz.gst} onChange={(e) => onBiz({ gst: e.target.value })} className={inp} data-testid="onb-gst" /></label>
+              <label className="block text-xs text-slate-600">{t.qst}<input value={biz.qst} onChange={(e) => onBiz({ qst: e.target.value })} className={inp} data-testid="onb-qst" /></label>
+            </div>
+            <LogoPicker t={t} logo={logo} onChange={onLogo} />
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">{t.ob3Text}</p>
+            <div className="grid grid-cols-2 gap-2">
+              {TEMPLATES.map((x) => (
+                <button key={x.id} type="button" onClick={() => onClose({ done: true, template: x.id })} className="border rounded-xl px-3 py-3 text-sm font-medium hover:border-blue-500 hover:bg-blue-50 text-left" data-testid={`onb-tpl-${x.id}`}>{x.label[lang]}</button>
+              ))}
+            </div>
+            <button type="button" onClick={() => onClose({ done: true, template: null })} className="w-full text-sm text-blue-700 font-medium py-2" data-testid="onb-finish">{t.obNoTpl}</button>
+            <p className="text-[11px] text-slate-400 text-center">{t.obLater}</p>
+          </div>
+        )}
+
+        {step < 3 && (
+          <div className="flex gap-2 mt-5">
+            {step > 1 && <button type="button" onClick={() => setStep(step - 1)} className="px-4 py-2.5 rounded-xl border text-sm font-medium">{t.obBack}</button>}
+            <button type="button" onClick={() => setStep(step + 1)} disabled={step === 1 && rbqBad} className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl font-semibold text-sm disabled:opacity-50" data-testid="onb-next">{t.obNext}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
