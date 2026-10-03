@@ -64,6 +64,7 @@ export function BackupPanel({ lang, t, lastExport, onExport, onImported }: {
       Object.entries(plan.set).forEach(([k, v]) => localStorage.setItem(k, v));
       const parts = [`${docs(plan.added)} ${one(plan.added) ? t.importAddedOne : t.importAdded}`];
       if (plan.duplicates) parts.push(`${plan.duplicates} ${t.importDup}`);
+      if (plan.upgraded) parts.push(`${plan.upgraded} ${t.importUpgraded}`);
       if (pending.skipped) parts.push(`${pending.skipped} ${t.importSkipped}`);
       onImported(plan, `${t.importDone} (${parts.join(", ")})`);
       setPending(null);

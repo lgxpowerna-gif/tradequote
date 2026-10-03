@@ -3,7 +3,7 @@ import autoTable from "jspdf-autotable";
 import { formatRate, type TaxLine } from "./tax";
 import { rbqLine } from "./rbq";
 
-type PdfArgs = {
+export type PdfArgs = {
   docType: "quote" | "invoice";
   lang: "en" | "fr";
   plan: "free" | "pro";
@@ -11,6 +11,9 @@ type PdfArgs = {
   company: { name: string; address: string; city: string; email: string; phone: string; bn: string; gst: string; qst?: string; rbq?: string; interac: string };
   client: { name: string; address: string; city: string; email: string };
   jobSite: string;
+  /** Optional job dates (YYYY-MM-DD), printed under the job site. */
+  jobDate?: string;
+  jobEndDate?: string;
   items: { description: string; quantity: number; unitPrice: number }[];
   subtotal: number;
   discountPct: number;
@@ -23,7 +26,24 @@ type PdfArgs = {
   labels: { description: string; qty: string; rate: string; subtotal: string; total: string; depositAmt: string; balance: string; discount: string };
 };
 
+export function pdfFileName(a: Pick<PdfArgs, "lang" | "docType" | "meta">): string {
+  const fr = a.lang === "fr";
+  const safe = a.meta.number.replace(/[\\/:*?"<>|]+/g, "-");
+  return `${fr ? (a.docType === "quote" ? "soumission" : "facture") : a.docType}-${safe}.pdf`;
+}
+
+/** Downloads the PDF (unchanged behaviour). */
 export function generateTradeQuotePDF(a: PdfArgs) {
+  buildTradeQuotePDF(a).save(pdfFileName(a));
+}
+
+/** Builds the PDF as a File (for the Web Share API). */
+export function tradeQuotePdfFile(a: PdfArgs): File {
+  const blob = buildTradeQuotePDF(a).output("blob");
+  return new File([blob], pdfFileName(a), { type: "application/pdf" });
+}
+
+function buildTradeQuotePDF(a: PdfArgs): jsPDF {
   const doc = new jsPDF();
   const w = doc.internal.pageSize.getWidth();
   const primary: [number, number, number] = [37, 99, 235];
@@ -87,6 +107,9 @@ export function generateTradeQuotePDF(a: PdfArgs) {
     a.client.city,
     a.client.email,
     a.jobSite ? `${fr ? "Chantier" : "Site"} : ${a.jobSite}` : "",
+    a.jobDate
+      ? `${fr ? "Travaux" : "Job date"} : ${a.jobDate}${a.jobEndDate && a.jobEndDate > a.jobDate ? (fr ? " au " : " to ") + a.jobEndDate : ""}`
+      : "",
   ].filter(Boolean) as string[];
   left.forEach((l, i) => {
     // RBQ licence line printed in bold, as required on every quote/invoice
@@ -187,5 +210,5 @@ export function generateTradeQuotePDF(a: PdfArgs) {
     287,
     { align: "center" }
   );
-  doc.save(`${fr ? (a.docType === "quote" ? "soumission" : "facture") : a.docType}-${a.meta.number}.pdf`);
+  return doc;
 }

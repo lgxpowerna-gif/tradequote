@@ -22,5 +22,9 @@ Next.js 14, Tailwind, Stripe, jsPDF
 - Quotes & invoices for Canadian trades
 - GST/HST presets (ON, QC, BC, Atlantic)
 - Interac, deposits, discounts
+- Full document history (reopen / duplicate), JSON backup v2 (v1 still importable)
+- Share / email the PDF (Web Share API, mailto fallback), Google Calendar link + .ics
+- Roofing template (Toiture)
+- Accounting export (Pro): QuickBooks Online invoice CSV + Excel CSV with GST/QST columns
 - EN / FR
 - Stripe Pro ($9/mo or $79/yr)

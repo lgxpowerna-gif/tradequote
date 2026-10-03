@@ -8,7 +8,7 @@ export const OPERATOR = "Janvier Alie (Multilaser Créations)";
 export const RESPONSIBLE = "Janvier Alie";
 export const CITY = "Mont-Laurier (Québec)";
 export const CONTACT_EMAIL = "lgxpowerna@gmail.com";
-export const UPDATED = { fr: "2 octobre 2026", en: "October 2, 2026" };
+export const UPDATED = { fr: "3 octobre 2026", en: "October 3, 2026" };
 const BRAND: string = "TradeQuote";
 
 type L = "fr" | "en";
@@ -50,6 +50,7 @@ export function PrivacyPage({ lang }: { lang: L }) {
         <ul>
           <li><strong>Data you type into the app</strong> (your business details, GST/QST{BRAND === "TradeQuote" ? "/RBQ" : ""} numbers, clients, line items, document history): stored <strong>only in your browser's local storage</strong> on your device. It is not sent to our servers; PDFs are generated in your browser.</li>
           <li><strong>Backup file</strong> (“Export my data” button): created <strong>locally on your device</strong> and downloaded where you choose; it is never sent to our servers. It contains your business details, document history and Pro subscription identifier, so keep it somewhere safe. Importing a backup only reads the file in your browser.</li>
+          <li><strong>Share, email and calendar</strong>: “Share / Send” hands the PDF to the app you pick on your device (Mail, Gmail, Messages…) or opens your email app; “Google Calendar” opens Google Calendar with the job details (client name, address, number, total) pre-filled, so those details are sent to Google by your browser only if you use that button; the .ics file and the CSV exports are created locally on your device. We receive none of this.</li>
           <li><strong>Pro subscription payments</strong>: processed by Stripe. Stripe collects your name, email, billing address and card details; we never see your full card number. In our Stripe account we can see your name, email, billing address, subscription status and the last 4 digits of the card. Your browser keeps the Stripe subscription identifier so the app can confirm your Pro status with Stripe.</li>
           <li><strong>Technical logs</strong>: our host, Vercel, records technical data (IP address, browser, page requested, time) to operate and secure the service.</li>
           <li><strong>Emails you send us</strong>: your address and the content of your message.</li>
@@ -83,6 +84,7 @@ export function PrivacyPage({ lang }: { lang: L }) {
       <ul>
         <li><strong>Ce que vous saisissez dans l'application</strong> (coordonnées de votre entreprise, numéros TPS/TVQ{BRAND === "TradeQuote" ? "/RBQ" : ""}, clients, lignes, historique) : conservé <strong>uniquement dans le stockage local de votre navigateur</strong>, sur votre appareil. Ces données ne sont pas transmises à nos serveurs ; les PDF sont générés dans votre navigateur.</li>
         <li><strong>Fichier de sauvegarde</strong> (bouton « Exporter mes données ») : créé <strong>localement sur votre appareil</strong> et téléchargé à l'endroit de votre choix ; il n'est jamais envoyé à nos serveurs. Il contient vos coordonnées d'entreprise, l'historique de vos documents et votre identifiant d'abonnement Pro : conservez-le en lieu sûr. L'importation d'une sauvegarde se fait uniquement dans votre navigateur.</li>
+        <li><strong>Partage, courriel et agenda</strong> : « Partager / Envoyer » remet le PDF à l'application choisie sur votre appareil (Courriel, Gmail, Messages…) ou ouvre votre logiciel de courriel ; « Google Agenda » ouvre Google Agenda avec les détails des travaux pré-remplis (nom du client, adresse, numéro, total) : ces détails sont transmis à Google par votre navigateur seulement si vous utilisez ce bouton. Le fichier .ics et les exports CSV sont créés localement sur votre appareil. Nous ne recevons rien de tout cela.</li>
         <li><strong>Paiement de l'abonnement Pro</strong> : traité par Stripe. Stripe recueille votre nom, courriel, adresse de facturation et carte ; nous n'avons jamais accès au numéro complet de la carte. Dans notre compte Stripe, nous voyons votre nom, courriel, adresse de facturation, le statut de l'abonnement et les 4 derniers chiffres de la carte. Votre navigateur conserve l'identifiant d'abonnement Stripe pour que l'application vérifie votre statut Pro auprès de Stripe.</li>
         <li><strong>Journaux techniques</strong> : notre hébergeur, Vercel, enregistre des données techniques (adresse IP, navigateur, page demandée, heure) pour faire fonctionner et sécuriser le service.</li>
         <li><strong>Courriels que vous nous envoyez</strong> : votre adresse et le contenu du message.</li>
@@ -117,7 +119,7 @@ export function TermsPage({ lang }: { lang: L }) {
         <h2>1. Operator</h2>
         <p>{BRAND} is operated by {OPERATOR}, {CITY}. Contact: <Mail />.</p>
         <h2>2. Service</h2>
-        <p>{BRAND} lets you create {BRAND === "TradeQuote" ? "quotes and invoices" : "invoices"} as PDFs. The free plan allows 5 documents per month with a watermark. The Pro plan removes these limits.</p>
+        <p>{BRAND} lets you create {BRAND === "TradeQuote" ? "quotes and invoices" : "invoices"} as PDFs. The free plan allows 5 documents per month with a watermark. The Pro plan removes these limits and adds the accounting export (CSV files for QuickBooks Online and spreadsheets). Imported files must be checked in your accounting software; you remain responsible for your bookkeeping.</p>
         <h2>3. Pro subscription</h2>
         <ul>
           <li>Price: <strong>$9 CAD per month</strong> (or $79 CAD per year), plus applicable taxes, paid by card through Stripe.</li>
@@ -146,7 +148,7 @@ export function TermsPage({ lang }: { lang: L }) {
       <h2>1. Exploitant</h2>
       <p>{BRAND} est exploité par {OPERATOR}, {CITY}. Contact : <Mail />.</p>
       <h2>2. Service</h2>
-      <p>{BRAND} permet de créer {BRAND === "TradeQuote" ? "des soumissions et des factures" : "des factures"} en PDF. Le forfait gratuit permet 5 documents par mois, avec filigrane. Le forfait Pro retire ces limites.</p>
+      <p>{BRAND} permet de créer {BRAND === "TradeQuote" ? "des soumissions et des factures" : "des factures"} en PDF. Le forfait gratuit permet 5 documents par mois, avec filigrane. Le forfait Pro retire ces limites et ajoute l'export comptable (fichiers CSV pour QuickBooks en ligne et pour tableur). Vérifiez les données importées dans votre logiciel comptable ; vous demeurez responsable de votre comptabilité.</p>
       <h2>3. Abonnement Pro</h2>
       <ul>
         <li>Prix : <strong>9 $ CA par mois</strong> (ou 79 $ CA par année), taxes applicables en sus, payé par carte via Stripe.</li>
