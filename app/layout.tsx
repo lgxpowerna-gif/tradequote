@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: "%s | TradeQuote",
   },
   description:
-    "Soumissions et factures professionnelles en français pour entrepreneurs et gens de métier du Québec : licence RBQ imprimée, TPS 5 % + TVQ 9,975 %, acomptes, Virement Interac. Gratuit · Pro 9 $/mois.",
+    "Soumissions et factures professionnelles en français pour entrepreneurs et gens de métier du Québec : licence RBQ imprimée, TPS 5 % + TVQ 9,975 %, acomptes, historique complet, partage par courriel, agenda, modèle Toiture. Export comptable QuickBooks/Excel avec Pro. Gratuit · Pro 9 $/mois.",
   keywords: [
     "contractor quote software Canada",
     "renovation invoice",

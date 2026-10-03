@@ -131,6 +131,7 @@ await test("line printed on documents", () => {
   assert.equal(rbq.rbqLine("12", "fr"), "");
 });
 
+const docsLib = await load("lib/docs.ts");
 const backup = await load("lib/backup.ts");
 console.log("backup");
 const store = (o) => (k) => (k in o ? o[k] : null);
@@ -145,7 +146,7 @@ const fullStore = {
 await test("export: version, date, user keys only (no confirmed_at / legacy / last_export)", () => {
   const b = backup.buildBackup(store(fullStore), oct);
   assert.equal(b.format, "tradequote-backup");
-  assert.equal(b.version, 1);
+  assert.equal(b.version, 2);
   assert.equal(b.exportedAt, oct.toISOString());
   assert.equal(b.data.history.length, 2);
   assert.deepEqual(b.data.company, { name: "Rénos Laurier", rbq: "1234-5678-01", gst: "123" });
@@ -177,7 +178,7 @@ await test("parse: clear error codes for invalid files", () => {
   assert.deepEqual(backup.parseBackup("   "), { ok: false, error: "empty" });
   assert.deepEqual(backup.parseBackup("[]"), { ok: false, error: "wrongApp" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ format: "facturepro-backup", version: 1, data: {} })), { ok: false, error: "wrongApp" });
-  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: 2 })), { ok: false, error: "newerVersion" });
+  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: 3 })), { ok: false, error: "newerVersion" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: "1" })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: { history: "x" } })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: { company: [] } })), { ok: false, error: "badShape" });
@@ -265,6 +266,148 @@ await test("export reminder: only when data is > 30 days old and no export/snooz
   assert.equal(backup.exportReminderDue({ lastExport: String(now - 10 * day), snoozedAt: null, history: old, now }), false);
   assert.equal(backup.exportReminderDue({ lastExport: String(now - 31 * day), snoozedAt: null, history: old, now }), true);
   assert.equal(backup.exportReminderDue({ lastExport: String(now - 31 * day), snoozedAt: String(now - day), history: old, now }), false);
+});
+
+/* ───────── full documents (backup v2) ───────── */
+const accounting = await load("lib/accounting.ts");
+const schedule = await load("lib/schedule.ts");
+const full = (over = {}) => {
+  const items = over.items ?? [{ description: "Bardeaux d'asphalte (par paquet)", quantity: 30, unitPrice: 42.5 }, { description: "Main-d'œuvre – pose (par heure)", quantity: 16, unitPrice: 65 }];
+  const t = docsLib.computeTotals(items, over.discountPct ?? 0, over.taxPreset ?? "gst-qst-qc", 0, over.depositPct ?? 0, "fr");
+  return { client: { name: "Jean Tremblay", address: "12 rue Principale", city: "Mont-Laurier", email: "jean@example.com" }, jobSite: "12 rue Principale, Mont-Laurier", jobDate: "2026-10-15", jobEndDate: "2026-10-16", due: "2026-10-31", notes: "Merci", items, taxPreset: over.taxPreset ?? "gst-qst-qc", customRate: 0, discountPct: over.discountPct ?? 0, depositPct: over.depositPct ?? 0, ...t };
+};
+const fdoc = (id, number, date, type = "invoice", over) => { const d = full(over); return { id, type, number, clientName: d.client.name, total: d.total, date, doc: d }; };
+console.log("full documents / backup v2");
+await test("computeTotals: TPS/TVQ on 2 315 $ with 10 % discount and 30 % deposit", () => {
+  const t = docsLib.computeTotals([{ description: "a", quantity: 1, unitPrice: 2315 }], 10, "gst-qst-qc", 0, 30, "fr");
+  assert.equal(t.subtotal, 2315); assert.equal(t.discountAmount, 231.5);
+  assert.deepEqual(t.taxLines.map((l) => [l.code, l.amount]), [["gst", 104.18], ["qst", 207.83]]);
+  assert.equal(t.total, 2395.51); assert.equal(t.depositAmt, 718.65); assert.equal(t.balance, 1676.86);
+});
+await test("v2 export/parse keeps the full document; v1 summary entries still accepted", () => {
+  const h = [fdoc("1790000000003", "F-2026-0001", "2026-10-02"), doc("1790000000001", "S-2026-1001")];
+  const b = backup.buildBackup(store({ tq_history: JSON.stringify(h) }), oct);
+  assert.equal(b.version, 2);
+  const r = backup.parseBackup(JSON.stringify(b));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.backup.data.history[0].doc.items, h[0].doc.items);
+  assert.equal(r.backup.data.history[0].doc.taxLines[1].code, "qst");
+  assert.equal(r.backup.data.history[1].doc, undefined);
+  const v1 = backup.parseBackup(JSON.stringify({ format: "tradequote-backup", version: 1, exportedAt: "2026-09-01T00:00:00Z", data: { history: [doc("5", "S-2026-0005")], company: { name: "Vieux" } } }));
+  assert.equal(v1.ok, true); assert.equal(v1.backup.data.history.length, 1); assert.equal(v1.backup.data.history[0].doc, undefined);
+});
+await test("sanitizeFullDoc drops junk and caps sizes", () => {
+  assert.equal(docsLib.sanitizeFullDoc(null), undefined);
+  assert.equal(docsLib.sanitizeFullDoc({ items: "x" }), undefined);
+  const d = docsLib.sanitizeFullDoc({ items: [{ description: 5, quantity: "2", unitPrice: 3 }, null], jobDate: "15/10/2026", client: { name: "<b>" }, total: NaN });
+  assert.deepEqual(d.items, [{ description: "", quantity: 0, unitPrice: 3 }]);
+  assert.equal(d.jobDate, ""); assert.equal(d.total, 0); assert.equal(d.client.name, "<b>");
+});
+await test("merge: summary-only entry is completed by the file's full copy", () => {
+  const cur = [doc("1", "F-2026-0001", "2026-10-01", "invoice")];
+  const m = backup.mergeHistory(cur, [fdoc("1", "F-2026-0001", "2026-10-01")]);
+  assert.equal(m.added, 0); assert.equal(m.duplicates, 1); assert.equal(m.upgraded, 1);
+  assert.ok(m.history[0].doc);
+  // a full current copy is never replaced
+  const m2 = backup.mergeHistory([fdoc("1", "F-2026-0001", "2026-10-01")], [fdoc("1", "F-2026-0001", "2026-10-01", "invoice", { discountPct: 50 })]);
+  assert.equal(m2.upgraded, 0); assert.equal(m2.history[0].doc.discountPct, 0);
+});
+await test("upsertHistory + nextDocNumber", () => {
+  const h = [fdoc("1", "F-2026-0007", "2026-10-01"), doc("2", "S-2026-4821")];
+  assert.equal(docsLib.nextDocNumber(h, "invoice", "fr", oct), "F-2026-0008");
+  assert.equal(docsLib.nextDocNumber(h, "quote", "fr", oct), "S-2026-4822");
+  assert.equal(docsLib.nextDocNumber([], "quote", "en", oct), "Q-2026-0001");
+  const up = docsLib.upsertHistory(h, { ...fdoc("9", "f-2026-0007 ", "2026-10-03"), clientName: "Jean Tremblay" }, 500);
+  assert.equal(up.isNew, false); assert.equal(up.history.length, 2); assert.equal(up.history[0].id, "1"); assert.equal(up.history[0].date, "2026-10-03");
+  const add = docsLib.upsertHistory(h, fdoc("9", "F-2026-0008", "2026-10-03"), 500);
+  assert.equal(add.isNew, true); assert.equal(add.history.length, 3);
+});
+
+console.log("accounting export");
+await test("selectDocs: date range, invoices only, summary entries counted as skipped", () => {
+  const h = [fdoc("1", "F-2026-0002", "2026-10-02"), fdoc("2", "F-2026-0001", "2026-09-30"), fdoc("3", "S-2026-0001", "2026-10-01", "quote"), doc("4", "F-2026-0900", "2026-10-01", "invoice"), fdoc("5", "F-2025-0001", "2025-12-31")];
+  const r = accounting.selectDocs(h, { from: "2026-09-30", to: "2026-10-31" });
+  assert.deepEqual(r.docs.map((d) => d.number), ["F-2026-0001", "F-2026-0002"]);
+  assert.equal(r.skippedSummary, 1);
+  assert.equal(accounting.selectDocs(h, { from: "2026-10-01" }, ["invoice", "quote"]).docs.length, 2);
+});
+const qboOpts = { product: "Services", sitePrefix: "Chantier : ", discountNote: (p) => `(remise ${p} % incluse)` };
+await test("QBO CSV: headers, one row per line, DD/MM/YYYY, no BOM, tax code", () => {
+  const { csv, invoices, rows } = accounting.buildQboCsv([fdoc("1", "F-2026-0001", "2026-10-02")], qboOpts);
+  const lines = csv.trimEnd().split("\r\n");
+  assert.equal(csv.charCodeAt(0), "I".charCodeAt(0));
+  assert.equal(lines[0], "InvoiceNo,Customer,InvoiceDate,DueDate,Terms,Location,Memo,Item(Product/Service),ItemDescription,ItemQuantity,ItemRate,ItemAmount,ItemTaxCode");
+  assert.equal(invoices, 1); assert.equal(rows, 2);
+  assert.equal(lines[1], "F-2026-0001,Jean Tremblay,02/10/2026,31/10/2026,,,\"Chantier : 12 rue Principale, Mont-Laurier\",Services,Bardeaux d'asphalte (par paquet),30,42.5,1275.00,TPS/TVQ QC");
+  assert.equal(lines[2].split(",").slice(-4).join(","), "16,65,1040.00,TPS/TVQ QC");
+});
+await test("QBO CSV: discount folded into line amounts, sum = pre-tax amount", () => {
+  const d = fdoc("1", "F-2026-0003", "2026-10-02", "invoice", { discountPct: 7.5, items: [{ description: "A", quantity: 3, unitPrice: 33.33 }, { description: "B", quantity: 1, unitPrice: 0.05 }, { description: "", quantity: 0, unitPrice: 0 }] });
+  const lines = accounting.netLines(d.doc);
+  assert.equal(lines.length, 2);
+  const sum = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  assert.equal(sum, Math.round((d.doc.subtotal - d.doc.discountAmount) * 100) / 100);
+  assert.ok(lines.every((l) => l.quantity === 1 && l.rate === l.amount));
+  const { csv } = accounting.buildQboCsv([d], qboOpts);
+  assert.ok(csv.includes("A (remise 7.5 % incluse)"));
+  assert.ok(!/,-\d/.test(csv));
+});
+await test("QBO tax codes per preset", () => {
+  assert.equal(accounting.qboTaxCode({ taxPreset: "hst-on", customRate: 0 }), "TVH ON");
+  assert.equal(accounting.qboTaxCode({ taxPreset: "none", customRate: 0 }), "Exonéré");
+  assert.equal(accounting.qboTaxCode({ taxPreset: "custom", customRate: 8.5 }), "Taxe 8,5 %");
+});
+await test("Excel CSV (fr): BOM, ';' separator, ',' decimals, TPS/TVQ columns add up", () => {
+  const d = fdoc("1", "F-2026-0001", "2026-10-02", "invoice", { depositPct: 30 });
+  const csv = accounting.buildSheetCsv([d, fdoc("2", "=HYPERLINK(1)", "2026-10-03", "quote")], "fr");
+  assert.equal(csv.charCodeAt(0), 0xfeff);
+  const [head, row, row2] = csv.slice(1).trimEnd().split("\r\n").map((l) => l.split(";"));
+  const col = (n) => row[head.indexOf(n)];
+  assert.equal(col("TPS"), "115,75"); assert.equal(col("TVQ"), "230,92"); assert.equal(col("Montant avant taxes"), "2315,00");
+  assert.equal(col("Total"), "2661,67"); assert.equal(col("Acompte demandé"), "798,50"); assert.equal(col("Solde dû"), "1863,17");
+  assert.equal(col("TVH"), "0,00"); assert.equal(col("Taxes appliquées"), "TPS 5 % + TVQ 9,975 %");
+  assert.equal(row2[0], "Soumission"); assert.equal(row2[1], "'=HYPERLINK(1)");
+  const en = accounting.buildSheetCsv([d], "en").slice(1).split("\r\n")[1].split(",");
+  assert.ok(en.includes("115.75") && en.includes("2661.67"));
+});
+
+console.log("share / calendar");
+const si = { lang: "fr", docType: "quote", number: "S-2026-0001", clientName: "Jean Tremblay", clientEmail: "jean@example.com", clientAddress: "12 rue Principale, Mont-Laurier", jobSite: "45, ch. du Lac; Ferme-Neuve", jobDate: "2026-10-15", jobEndDate: "2026-10-16", total: "2 661,67 $", companyName: "Toitures Nord", companyPhone: "819-555-0000" };
+await test("mailto: recipient, subject, body with CRLF, no attachment text in the message", () => {
+  const m = schedule.mailtoLink(si);
+  assert.ok(m.startsWith("mailto:jean%40example.com?subject="));
+  const q = new URLSearchParams(m.split("?")[1]);
+  assert.equal(q.get("subject"), "Soumission n° S-2026-0001 – Toitures Nord");
+  const body = q.get("body");
+  assert.ok(body.includes("Bonjour Jean Tremblay,\r\n"));
+  assert.ok(body.includes("au montant de 2 661,67 $ (taxes incluses)"));
+  assert.ok(body.includes("Date prévue des travaux : jeudi 15 octobre 2026 au vendredi 16 octobre 2026"));
+  assert.ok(!/joindre|attach/i.test(body));
+});
+await test("Google Calendar link: all-day span with exclusive end, location, Toronto tz", () => {
+  const u = new URL(schedule.googleCalendarUrl(si));
+  assert.equal(u.origin + u.pathname, "https://calendar.google.com/calendar/render");
+  assert.equal(u.searchParams.get("action"), "TEMPLATE");
+  assert.equal(u.searchParams.get("dates"), "20261015/20261017");
+  assert.equal(u.searchParams.get("location"), "45, ch. du Lac; Ferme-Neuve");
+  assert.equal(u.searchParams.get("text"), "Travaux – Jean Tremblay (S-2026-0001)");
+  assert.equal(schedule.googleCalendarUrl({ ...si, jobDate: "" }), null);
+  assert.equal(new URL(schedule.googleCalendarUrl({ ...si, jobEndDate: "2026-10-01" })).searchParams.get("dates"), "20261015/20261016");
+  assert.equal(new URL(schedule.googleCalendarUrl({ ...si, jobDate: "2026-12-31", jobEndDate: "" })).searchParams.get("dates"), "20261231/20270101");
+});
+await test(".ics: RFC 5545 structure, escaping, CRLF, folding at 75 octets", () => {
+  const ics = schedule.buildIcs({ ...si, clientName: "Jean Tremblay ".repeat(6).trim() }, new Date(Date.UTC(2026, 9, 3, 17, 5, 9)));
+  assert.ok(ics.startsWith("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"));
+  assert.ok(ics.endsWith("END:VEVENT\r\nEND:VCALENDAR\r\n"));
+  assert.ok(ics.includes("DTSTART;VALUE=DATE:20261015\r\nDTEND;VALUE=DATE:20261017\r\n"));
+  assert.ok(ics.includes("DTSTAMP:20261003T170509Z"));
+  assert.ok(ics.includes("LOCATION:45\\, ch. du Lac\\; Ferme-Neuve"));
+  assert.ok(!/\r(?!\n)|(?<!\r)\n/.test(ics), "only CRLF");
+  for (const line of ics.split("\r\n")) assert.ok(new TextEncoder().encode(line).length <= 75, line);
+  const unfolded = ics.replace(/\r\n /g, "");
+  assert.ok(unfolded.includes("SUMMARY:Travaux – " + "Jean Tremblay ".repeat(6).trim() + " (S-2026-0001)"));
+  assert.equal(schedule.icsFileName(si), "travaux-S-2026-0001.ics");
+  assert.equal(schedule.buildIcs({ ...si, jobDate: "" }), null);
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

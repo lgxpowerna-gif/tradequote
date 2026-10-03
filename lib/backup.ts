@@ -4,6 +4,10 @@
  * Everything stays on the user's device: the backup file is built in the browser and downloaded,
  * and an import only reads a file chosen by the user. Nothing is sent to a server.
  *
+ * Version 2 (Oct. 2026): history entries may carry the full document (`doc`, see lib/docs.ts) so old
+ * quotes/invoices can be reopened and exported to accounting. Version 1 files (summary-only entries)
+ * are still accepted and imported as summary-only entries.
+ *
  * What is exported: document history, business details (incl. RBQ licence), language, the Stripe
  * subscription id (so Pro carries over; it is re-verified with Stripe on the server at each load)
  * and this month's free-plan usage.
@@ -13,9 +17,11 @@
  * it, so a backup can't be used to reset the free monthly quota.
  */
 import { isValidSubscriptionId, monthKey } from "./plan";
+import { docKey, sanitizeFullDoc, type DocType, type SavedDoc } from "./docs";
+export type { DocType, SavedDoc };
 
 export const BACKUP_FORMAT = "tradequote-backup";
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 export const MAX_BACKUP_BYTES = 5 * 1024 * 1024; // 5 MB
 /** History kept in the browser (was 50; raised so merging two devices doesn't silently drop documents). */
 export const MAX_HISTORY = 500;
@@ -25,8 +31,6 @@ export const REMINDER_DAYS = 30;
 const DAY_MS = 86_400_000;
 const MAX_STR = 1000;
 
-export type DocType = "quote" | "invoice";
-export type SavedDoc = { id: string; type: DocType; number: string; clientName: string; total: number; date: string };
 export const COMPANY_FIELDS = ["name", "address", "city", "email", "phone", "bn", "gst", "qst", "rbq", "interac"] as const;
 export type Company = Record<(typeof COMPANY_FIELDS)[number], string>;
 export type BackupLang = "fr" | "en";
@@ -61,7 +65,11 @@ export function sanitizeDoc(v: unknown): SavedDoc | null {
   const number = str(o.number, 100);
   const total = typeof o.total === "number" && Number.isFinite(o.total) ? o.total : null;
   if (!id || !type || number === null || total === null) return null;
-  return { id, type, number, clientName: str(o.clientName, 300) ?? "", total, date: str(o.date, 40) ?? "" };
+  const out: SavedDoc = { id, type, number, clientName: str(o.clientName, 300) ?? "", total, date: str(o.date, 40) ?? "" };
+  const doc = sanitizeFullDoc(o.doc);
+  if (doc) out.doc = doc;
+  if (typeof o.updatedAt === "number" && Number.isFinite(o.updatedAt)) out.updatedAt = o.updatedAt;
+  return out;
 }
 
 export function sanitizeHistory(v: unknown): { docs: SavedDoc[]; skipped: number } {
@@ -133,7 +141,6 @@ export function parseBackup(text: string, byteSize?: number): ParseResult {
   return { ok: true, backup: { format: BACKUP_FORMAT, app: "TradeQuote", version: o.version, exportedAt, data }, skipped };
 }
 
-const docKey = (d: SavedDoc) => `${d.type}|${d.number.trim().toLowerCase()}`;
 const docTime = (d: SavedDoc) => {
   const t = Date.parse(d.date);
   return Number.isFinite(t) ? t : 0;
@@ -141,20 +148,28 @@ const docTime = (d: SavedDoc) => {
 
 /**
  * Merges histories without duplicates. A document is a duplicate when it has the same id, or the same
- * type + number (case-insensitive) as one already present. On conflict the CURRENT browser's copy wins.
- * Result is sorted newest first (date, then id) and capped at MAX_HISTORY.
+ * type + number (case-insensitive) as one already present. On conflict the CURRENT browser's copy wins,
+ * except that a summary-only entry (old version) is completed with the file's full document when the
+ * file has it (`upgraded`). Result is sorted newest first (date, then id) and capped at MAX_HISTORY.
  */
-export function mergeHistory(current: SavedDoc[], incoming: SavedDoc[]): { history: SavedDoc[]; added: number; duplicates: number } {
+export function mergeHistory(current: SavedDoc[], incoming: SavedDoc[]): { history: SavedDoc[]; added: number; duplicates: number; upgraded: number } {
   const ids = new Set(current.map((d) => d.id));
   const keys = new Set(current.map(docKey));
   const out = [...current];
-  let added = 0, duplicates = 0;
+  let added = 0, duplicates = 0, upgraded = 0;
   for (const d of incoming) {
-    if (ids.has(d.id) || (d.number.trim() && keys.has(docKey(d)))) { duplicates++; continue; }
+    if (ids.has(d.id) || (d.number.trim() && keys.has(docKey(d)))) {
+      duplicates++;
+      if (d.doc) {
+        const i = out.findIndex((x) => x.id === d.id || (d.number.trim() && docKey(x) === docKey(d)));
+        if (i >= 0 && !out[i].doc && docKey(out[i]) === docKey(d)) { out[i] = { ...out[i], doc: d.doc }; upgraded++; }
+      }
+      continue;
+    }
     ids.add(d.id); keys.add(docKey(d)); out.push(d); added++;
   }
   out.sort((a, b) => docTime(b) - docTime(a) || (b.id > a.id ? 1 : b.id < a.id ? -1 : 0));
-  return { history: out.slice(0, MAX_HISTORY), added, duplicates };
+  return { history: out.slice(0, MAX_HISTORY), added, duplicates, upgraded };
 }
 
 /** Merge: fields already filled in this browser are kept; empty ones are filled from the file. */
@@ -177,6 +192,7 @@ export type ImportPlan = {
   subChanged: boolean;
   added: number;
   duplicates: number;
+  upgraded: number;
 };
 
 /** Computes what an import writes, from the current localStorage (getter) and a parsed backup. */
@@ -185,9 +201,9 @@ export function planImport(get: Getter, backup: Backup, mode: ImportMode, now: D
   const curCompany = sanitizeCompany(safeJson(get("tq_company")));
   const d = backup.data;
 
-  let history: SavedDoc[], added: number, duplicates = 0;
+  let history: SavedDoc[], added: number, duplicates = 0, upgraded = 0;
   if (mode === "replace") { history = mergeHistory([], d.history).history; added = history.length; }
-  else ({ history, added, duplicates } = mergeHistory(curHistory, d.history));
+  else ({ history, added, duplicates, upgraded } = mergeHistory(curHistory, d.history));
   const company = mode === "replace" ? { ...d.company } : mergeCompany(curCompany, d.company);
 
   const set: Record<string, string> = { tq_history: JSON.stringify(history), tq_company: JSON.stringify(company) };
@@ -217,7 +233,7 @@ export function planImport(get: Getter, backup: Backup, mode: ImportMode, now: D
     set.tq_sub = d.sub; subChanged = true;
     remove.push("tq_pro_confirmed_at"); // belonged to the previous subscription; the server check decides
   }
-  return { set, remove, history, company, lang, count, subChanged, added, duplicates };
+  return { set, remove, history, company, lang, count, subChanged, added, duplicates, upgraded };
 }
 
 /** Gentle reminder: data older than REMINDER_DAYS and no export (or "later") in the last REMINDER_DAYS. */
