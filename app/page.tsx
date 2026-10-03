@@ -701,7 +701,7 @@ export default function Home(){
         <p>{t.footer}</p>
         <LegalFooterLinks lang={lang} className="mt-2"/>
         {plan==="pro"&&<div className="mt-2"><ManageSubscription lang={lang} compact/></div>}
-        <p className="text-xs mt-2 text-slate-400">© {new Date().getFullYear()} {t.brand} – Janvier Alie (Multilaser Créations), Mont-Laurier (QC) – {t.rights}</p>
+        <p className="text-xs mt-2 text-slate-400">© {new Date().getFullYear()} {t.brand} – Mont-Laurier (QC) – {t.rights}</p>
       </footer>
     </div>
   );
