@@ -34,3 +34,10 @@
 - **Sauvegarde v4** : statut et date de paiement inclus ; fichiers v1 à v3 toujours importables. **CSV Excel** : colonnes « Statut » et « Date de paiement ».
 - **Configuration initiale** (`components/Onboarding.tsx`) : 3 étapes (entreprise + RBQ, TPS/TVQ + logo facultatifs, modèle de métier), possible de passer, jamais réaffichée (`tq_onboarded`). Jamais montrée si un nom d'entreprise, un document ou un abonnement existe, ni après l'import d'une sauvegarde.
 - **Divers** : message de confirmation intégré à la barre du bas (téléphone) et à l'en-tête de l'aperçu (ordinateur), au lieu de flotter sur le contenu ; étapes claires pour joindre le PDF quand le partage direct n'est pas offert ; icône du site (favicon, icône Apple).
+
+## Ajouts (3 octobre 2026, suite 3) — régions et langues
+
+Le Québec reste la région par défaut (aucune région enregistrée = Québec) et son expérience est inchangée :
+mêmes PDF, mêmes totaux TPS/TVQ, même RBQ, mêmes exports et mêmes sauvegardes (v4). Autres provinces, États-Unis,
+France, Belgique et Suisse ajoutés, ainsi que l'interface et les PDF en anglais, chinois simplifié et arabe.
+Détails, taux et sources : `docs/REGIONS.md`.

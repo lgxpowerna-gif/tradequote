@@ -6,7 +6,8 @@
  * created by older versions only have the summary (number, client name, date, total); they are kept
  * as-is and shown as "summary only" (they can't be reopened or exported line by line).
  */
-import { computeTaxes, round2, type TaxLine } from "./tax";
+import { computeDocTaxes, round2, type TaxLine } from "./tax";
+import { sanitizeRegion, type Region } from "./region";
 
 export type DocType = "quote" | "invoice";
 /** History status (lib/status.ts): quotes draft/sent/accepted/refused, invoices sent/paid. */
@@ -14,7 +15,8 @@ export type DocStatus = "draft" | "sent" | "accepted" | "refused" | "paid";
 export const MAX_ITEMS = 200;
 const MAX_STR = 1000;
 
-export type DocItem = { description: string; quantity: number; unitPrice: number };
+/** vatRate: VAT presets only (France, Belgium, Switzerland); absent = document rate. */
+export type DocItem = { description: string; quantity: number; unitPrice: number; vatRate?: number };
 export type DocClient = { name: string; address: string; city: string; email: string; phone?: string };
 
 /** Complete document as stored in history (amounts are the ones printed on the PDF). */
@@ -38,6 +40,12 @@ export type FullDoc = {
   total: number;
   depositAmt: number;
   balance: number;
+  /** US: optional local sales tax % (state rate = customRate). */
+  localRate?: number;
+  /** VAT presets: rate applied to lines without their own rate. */
+  docVat?: number;
+  /** Region of the business when saved (absent on old documents = Québec). */
+  region?: Region;
 };
 
 export type SavedDoc = {
@@ -73,11 +81,11 @@ const ymd = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test
 export type Totals = Pick<FullDoc, "subtotal" | "discountAmount" | "taxLines" | "total" | "depositAmt" | "balance">;
 
 /** Same arithmetic as the editor (rounded to the cent where printed). */
-export function computeTotals(items: DocItem[], discountPct: number, taxPreset: string, customRate: number, depositPct: number, lang: "fr" | "en" = "fr"): Totals {
+export function computeTotals(items: DocItem[], discountPct: number, taxPreset: string, customRate: number, depositPct: number, lang: "fr" | "en" | "zh" | "ar" = "fr", opts: { localRate?: number; docVat?: number } = {}): Totals {
   const subtotal = round2(items.reduce((s, i) => s + i.quantity * i.unitPrice, 0));
   const discountAmount = round2(subtotal * (discountPct / 100));
   const taxable = Math.max(0, subtotal - discountAmount);
-  const t = computeTaxes(taxable, taxPreset, lang, customRate);
+  const t = computeDocTaxes(items, taxable, taxPreset, lang, customRate, opts.localRate || 0, opts.docVat);
   const depositAmt = round2(t.total * (depositPct / 100));
   return { subtotal, discountAmount, taxLines: t.lines, total: t.total, depositAmt, balance: round2(t.total - depositAmt) };
 }
@@ -91,16 +99,20 @@ export function sanitizeFullDoc(v: unknown): FullDoc | undefined {
   for (const x of o.items.slice(0, MAX_ITEMS)) {
     if (!x || typeof x !== "object") continue;
     const it = x as Record<string, unknown>;
-    items.push({ description: str(it.description), quantity: num(it.quantity), unitPrice: num(it.unitPrice) });
+    const item: DocItem = { description: str(it.description), quantity: num(it.quantity), unitPrice: num(it.unitPrice) };
+    if (typeof it.vatRate === "number" && Number.isFinite(it.vatRate) && it.vatRate >= 0 && it.vatRate <= 100) item.vatRate = it.vatRate;
+    items.push(item);
   }
   const c = (o.client && typeof o.client === "object" ? o.client : {}) as Record<string, unknown>;
   const taxLines: TaxLine[] = Array.isArray(o.taxLines)
     ? o.taxLines.slice(0, 10).filter((l) => l && typeof l === "object").map((l) => {
         const t = l as Record<string, unknown>;
-        return { code: str(t.code, 20), label: str(t.label, 40), rate: num(t.rate), amount: num(t.amount) };
+        const line: TaxLine = { code: str(t.code, 20), label: str(t.label, 40), rate: num(t.rate), amount: num(t.amount) };
+        if (typeof t.base === "number" && Number.isFinite(t.base)) line.base = t.base;
+        return line;
       })
     : [];
-  return {
+  const out: FullDoc = {
     client: { name: str(c.name, 300), address: str(c.address, 300), city: str(c.city, 300), email: str(c.email, 300), phone: str(c.phone, 60) },
     jobSite: str(o.jobSite, 300),
     jobDate: ymd(o.jobDate),
@@ -119,6 +131,10 @@ export function sanitizeFullDoc(v: unknown): FullDoc | undefined {
     depositAmt: num(o.depositAmt),
     balance: num(o.balance),
   };
+  if (num(o.localRate) > 0) out.localRate = num(o.localRate);
+  if (num(o.docVat) > 0) out.docVat = num(o.docVat);
+  if (o.region) out.region = sanitizeRegion(o.region);
+  return out;
 }
 
 export const docKey = (d: Pick<SavedDoc, "type" | "number">) => `${d.type}|${d.number.trim().toLowerCase()}`;
@@ -143,7 +159,7 @@ export function upsertHistory(history: SavedDoc[], entry: SavedDoc, max: number)
 }
 
 /** Next free document number for this year, e.g. S-2026-0007 (sequence after the highest one in history). */
-export function nextDocNumber(history: SavedDoc[], type: DocType, lang: "fr" | "en", now: Date = new Date()): string {
+export function nextDocNumber(history: SavedDoc[], type: DocType, lang: "fr" | "en" | "zh" | "ar", now: Date = new Date()): string {
   const prefix = type === "quote" ? (lang === "fr" ? "S" : "Q") : lang === "fr" ? "F" : "INV";
   const year = now.getFullYear();
   const re = new RegExp(`^${prefix}-${year}-(\\d{1,6})$`, "i");

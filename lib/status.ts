@@ -12,9 +12,11 @@ export const INVOICE_STATUSES: DocStatus[] = ["sent", "paid"];
 export const statusesFor = (type: DocType): DocStatus[] => (type === "quote" ? QUOTE_STATUSES : INVOICE_STATUSES);
 export const isStatusFor = (type: DocType, s: unknown): s is DocStatus => typeof s === "string" && (statusesFor(type) as string[]).includes(s);
 
-export const STATUS_LABELS: Record<"fr" | "en", Record<DocStatus, string>> = {
+export const STATUS_LABELS: Record<"fr" | "en" | "zh" | "ar", Record<DocStatus, string>> = {
   fr: { draft: "Brouillon", sent: "Envoyée", accepted: "Acceptée", refused: "Refusée", paid: "Payée" },
   en: { draft: "Draft", sent: "Sent", accepted: "Accepted", refused: "Declined", paid: "Paid" },
+  zh: { draft: "草稿", sent: "已发送", accepted: "已接受", refused: "已拒绝", paid: "已付款" },
+  ar: { draft: "مسودة", sent: "مُرسل", accepted: "مقبول", refused: "مرفوض", paid: "مدفوع" },
 };
 
 /** Status of an entry (default "sent" for entries without one). */

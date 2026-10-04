@@ -47,7 +47,7 @@ export function PrivacyPage({ lang }: { lang: L }) {
         <p>{BRAND} is operated by {OPERATOR}, {CITY}. The person responsible for the protection of personal information (Québec Law 25) can be reached at <Mail />.</p>
         <h2>What we collect and where it is stored</h2>
         <ul>
-          <li><strong>Data you type into the app</strong> (your business details and logo, GST/QST{BRAND === "TradeQuote" ? "/RBQ" : ""} numbers, client list with your clients' names, addresses, emails and phone numbers, line items, document history, the document in progress): stored <strong>only in your browser's local storage</strong> on your device. It is not sent to our servers; PDFs are generated in your browser.</li>
+          <li><strong>Data you type into the app</strong> (your business details and logo, GST/QST{BRAND === "TradeQuote" ? "/RBQ" : ""} numbers or the registration numbers of your region, such as SIRET or VAT number, your region (country and province or state), client list with your clients' names, addresses, emails and phone numbers, line items, document history, the document in progress): stored <strong>only in your browser's local storage</strong> on your device. It is not sent to our servers; PDFs are generated in your browser.</li>
           <li><strong>Backup file</strong> (“Export my data” button): created <strong>locally on your device</strong> and downloaded where you choose; it is never sent to our servers. It contains your business details and logo, your client list, document history and Pro subscription identifier, so keep it somewhere safe. Importing a backup only reads the file in your browser.</li>
           <li><strong>Share, email and calendar</strong>: “Share / Send” hands the PDF to the app you pick on your device (Mail, Gmail, Messages…) or opens your email app; “Google Calendar” opens Google Calendar with the job details (client name, address, number, total) pre-filled, so those details are sent to Google by your browser only if you use that button; the .ics file and the CSV exports are created locally on your device. We receive none of this.</li>
           <li><strong>Pro subscription payments</strong>: processed by Stripe. Stripe collects your name, email, billing address and card details; we never see your full card number. In our Stripe account we can see your name, email, billing address, subscription status and the last 4 digits of the card. Your browser keeps the Stripe subscription identifier so the app can confirm your Pro status with Stripe.</li>
@@ -69,6 +69,7 @@ export function PrivacyPage({ lang }: { lang: L }) {
         </ul>
         <h2>Your rights</h2>
         <p>You can ask to access, correct or delete your personal information, withdraw your consent, or receive your information in a structured format. Write to <Mail />; we reply within 30 days. You may also file a complaint with the Commission d'accès à l'information du Québec (cai.gouv.qc.ca).</p>
+        <p>If you use {BRAND} from the European Union or Switzerland, you have the same rights under the GDPR or the Swiss Federal Act on Data Protection (access, rectification, erasure, portability, objection) and may also complain to your local data protection authority. Users elsewhere (including the United States) can make the same requests by email.</p>
         <h2>Security incidents</h2>
         <p>If a confidentiality incident presents a risk of serious injury, we will notify the Commission d'accès à l'information and the people concerned, as required by law.</p>
         <h2>Delete the data stored in this browser</h2>
@@ -82,7 +83,7 @@ export function PrivacyPage({ lang }: { lang: L }) {
       <p>{BRAND} est exploité par {OPERATOR}, {CITY}. Le responsable de la protection des renseignements personnels (Loi 25) est joignable à <Mail />.</p>
       <h2>Renseignements recueillis et lieu de conservation</h2>
       <ul>
-        <li><strong>Ce que vous saisissez dans l'application</strong> (coordonnées et logo de votre entreprise, numéros TPS/TVQ{BRAND === "TradeQuote" ? "/RBQ" : ""}, carnet de clients avec le nom, l'adresse, le courriel et le téléphone de vos clients, lignes, historique, document en cours) : conservé <strong>uniquement dans le stockage local de votre navigateur</strong>, sur votre appareil. Ces données ne sont pas transmises à nos serveurs ; les PDF sont générés dans votre navigateur.</li>
+        <li><strong>Ce que vous saisissez dans l'application</strong> (coordonnées et logo de votre entreprise, numéros TPS/TVQ{BRAND === "TradeQuote" ? "/RBQ" : ""} ou numéros d'immatriculation de votre région, comme le SIRET ou le numéro de TVA, votre région (pays et province ou État), carnet de clients avec le nom, l'adresse, le courriel et le téléphone de vos clients, lignes, historique, document en cours) : conservé <strong>uniquement dans le stockage local de votre navigateur</strong>, sur votre appareil. Ces données ne sont pas transmises à nos serveurs ; les PDF sont générés dans votre navigateur.</li>
         <li><strong>Fichier de sauvegarde</strong> (bouton « Exporter mes données ») : créé <strong>localement sur votre appareil</strong> et téléchargé à l'endroit de votre choix ; il n'est jamais envoyé à nos serveurs. Il contient vos coordonnées d'entreprise et votre logo, votre carnet de clients, l'historique de vos documents et votre identifiant d'abonnement Pro : conservez-le en lieu sûr. L'importation d'une sauvegarde se fait uniquement dans votre navigateur.</li>
         <li><strong>Partage, courriel et agenda</strong> : « Partager / Envoyer » remet le PDF à l'application choisie sur votre appareil (Courriel, Gmail, Messages…) ou ouvre votre logiciel de courriel ; « Google Agenda » ouvre Google Agenda avec les détails des travaux pré-remplis (nom du client, adresse, numéro, total) : ces détails sont transmis à Google par votre navigateur seulement si vous utilisez ce bouton. Le fichier .ics et les exports CSV sont créés localement sur votre appareil. Nous ne recevons rien de tout cela.</li>
         <li><strong>Paiement de l'abonnement Pro</strong> : traité par Stripe. Stripe recueille votre nom, courriel, adresse de facturation et carte ; nous n'avons jamais accès au numéro complet de la carte. Dans notre compte Stripe, nous voyons votre nom, courriel, adresse de facturation, le statut de l'abonnement et les 4 derniers chiffres de la carte. Votre navigateur conserve l'identifiant d'abonnement Stripe pour que l'application vérifie votre statut Pro auprès de Stripe.</li>
@@ -104,6 +105,7 @@ export function PrivacyPage({ lang }: { lang: L }) {
       </ul>
       <h2>Vos droits</h2>
       <p>Vous pouvez demander l'accès à vos renseignements, leur rectification ou leur suppression, retirer votre consentement ou obtenir vos renseignements dans un format structuré. Écrivez à <Mail /> ; nous répondons dans un délai de 30 jours. Vous pouvez aussi porter plainte auprès de la Commission d'accès à l'information du Québec (cai.gouv.qc.ca).</p>
+      <p>Si vous utilisez {BRAND} depuis l'Union européenne ou la Suisse, vous disposez des mêmes droits en vertu du RGPD ou de la loi fédérale suisse sur la protection des données (accès, rectification, effacement, portabilité, opposition) et pouvez aussi saisir l'autorité de protection des données de votre pays. Ailleurs (notamment aux États-Unis), les mêmes demandes peuvent être faites par courriel.</p>
       <h2>Incidents de confidentialité</h2>
       <p>Si un incident de confidentialité présente un risque de préjudice sérieux, nous aviserons la Commission d'accès à l'information et les personnes concernées, comme l'exige la loi.</p>
       <h2>Effacer les données conservées dans ce navigateur</h2>
@@ -124,6 +126,7 @@ export function TermsPage({ lang }: { lang: L }) {
         <h2>3. Pro subscription</h2>
         <ul>
           <li>Price: <strong>$19 CAD per month</strong> (or $190 CAD per year), plus applicable taxes, paid by card through Stripe. This price applies to subscriptions started on or after October 3, 2026; existing subscribers keep the price they signed up at until notified as described below.</li>
+          <li>Prices are in Canadian dollars wherever you live. If your card is in another currency (USD, EUR, CHF…), your card issuer converts the amount and may charge conversion fees.</li>
           <li>The subscription renews automatically at the end of each period until cancelled.</li>
           <li>We will give at least 30 days' notice by email before any price change.</li>
         </ul>
@@ -135,12 +138,13 @@ export function TermsPage({ lang }: { lang: L }) {
         </ul>
         <h2>5. Your responsibilities</h2>
         <p>You are responsible for the information you enter and for the documents you issue (tax rates, GST/QST numbers{BRAND === "TradeQuote" ? ", RBQ licence number" : ""}, mandatory notices). {BRAND} is a tool, not accounting, tax or legal advice. Your data is stored in your browser: keep your own copies of your PDFs.</p>
+        <p>Outside Québec, the tax presets (GST/HST/PST for each Canadian province, VAT for France, Belgium and Switzerland) use the official rates in force in October 2026; US sales tax rates are entered by you. Check that the rates, VAT mentions (e.g. “TVA non applicable, art. 293 B du CGI”), licence and registration numbers match your situation and your local rules.</p>
         <h2>6. Availability and liability</h2>
         <p>The service is provided “as is”. We do our best to keep it available but do not guarantee uninterrupted service. To the extent permitted by law, our liability is limited to the amounts you paid in the last 12 months. Nothing in these terms limits your rights under the Québec Consumer Protection Act.</p>
         <h2>7. Changes</h2>
         <p>We may update these terms; the date above shows the latest version. Material changes will be announced in advance.</p>
         <h2>8. Governing law</h2>
-        <p>These terms are governed by the laws of the Province of Québec and the federal laws of Canada that apply there. Any dispute falls under the jurisdiction of the courts of Québec.</p>
+        <p>These terms are governed by the laws of the Province of Québec and the federal laws of Canada that apply there. Any dispute falls under the jurisdiction of the courts of Québec. Nothing in these terms limits mandatory protections that apply to you under the law of the place where you live.</p>
       </Shell>
     );
   }
@@ -153,6 +157,7 @@ export function TermsPage({ lang }: { lang: L }) {
       <h2>3. Abonnement Pro</h2>
       <ul>
         <li>Prix : <strong>19 $ CA par mois</strong> (ou 190 $ CA par année), taxes applicables en sus, payé par carte via Stripe. Ce prix s'applique aux abonnements souscrits à compter du 3 octobre 2026 ; les abonnés existants conservent le prix de leur abonnement jusqu'à un avis donné comme indiqué ci-dessous.</li>
+        <li>Les prix sont en dollars canadiens, peu importe où vous vous trouvez. Si votre carte est dans une autre devise (USD, EUR, CHF…), l'émetteur de la carte convertit le montant et peut facturer des frais de conversion.</li>
         <li>L'abonnement se renouvelle automatiquement à la fin de chaque période jusqu'à son annulation.</li>
         <li>Toute modification de prix sera annoncée par courriel au moins 30 jours à l'avance.</li>
       </ul>
@@ -164,12 +169,13 @@ export function TermsPage({ lang }: { lang: L }) {
       </ul>
       <h2>5. Vos responsabilités</h2>
       <p>Vous êtes responsable des renseignements saisis et des documents que vous émettez (taux de taxes, numéros TPS/TVQ{BRAND === "TradeQuote" ? ", numéro de licence RBQ" : ""}, mentions obligatoires). {BRAND} est un outil et ne constitue pas un conseil comptable, fiscal ou juridique. Vos données sont conservées dans votre navigateur : gardez vos propres copies de vos PDF.</p>
+      <p>Hors Québec, les préréglages de taxes (TPS/TVH/TVP de chaque province canadienne, TVA de la France, de la Belgique et de la Suisse) utilisent les taux officiels en vigueur en octobre 2026 ; aux États-Unis, vous saisissez vous-même le taux de taxe de vente. Vérifiez que les taux, les mentions de TVA (p. ex. « TVA non applicable, art. 293 B du CGI »), la licence et les numéros d'immatriculation correspondent à votre situation et aux règles locales.</p>
       <h2>6. Disponibilité et responsabilité</h2>
       <p>Le service est fourni « tel quel ». Nous faisons de notre mieux pour qu'il soit disponible, sans garantir un service ininterrompu. Dans la mesure permise par la loi, notre responsabilité se limite aux sommes que vous avez payées au cours des 12 derniers mois. Rien dans les présentes ne limite les droits que vous accorde la Loi sur la protection du consommateur du Québec.</p>
       <h2>7. Modifications</h2>
       <p>Nous pouvons mettre à jour ces conditions ; la date ci-dessus indique la version en vigueur. Les changements importants seront annoncés à l'avance.</p>
       <h2>8. Droit applicable</h2>
-      <p>Ces conditions sont régies par les lois de la province de Québec et les lois fédérales du Canada qui s'y appliquent. Tout litige relève des tribunaux du Québec.</p>
+      <p>Ces conditions sont régies par les lois de la province de Québec et les lois fédérales du Canada qui s'y appliquent. Tout litige relève des tribunaux du Québec. Rien dans ces conditions ne limite les protections impératives que vous accorde la loi de votre lieu de résidence.</p>
     </Shell>
   );
 }

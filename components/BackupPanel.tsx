@@ -41,7 +41,7 @@ export function BackupPanel({ lang, t, lastExport, onExport, onImported }: {
   const [error, setError] = useState<string | null>(null);
   const one = (n: number) => (lang === "fr" ? n <= 1 : n === 1);
   const docs = (n: number) => `${n} ${one(n) ? t.importDoc : t.importDocs}`;
-  const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(lang === "fr" ? "fr-CA" : "en-CA", { year: "numeric", month: "long", day: "numeric" });
+  const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(lang === "fr" ? "fr-CA" : lang === "zh" ? "zh-CN" : lang === "ar" ? "ar-u-nu-latn" : "en-CA", { year: "numeric", month: "long", day: "numeric" });
 
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -1,9 +1,10 @@
 "use client";
 import { useMemo, useState } from "react";
-import type { i18n, Lang } from "@/lib/i18n";
+import { baseLang, type i18n, type Lang } from "@/lib/i18n";
 import type { SavedDoc } from "@/lib/docs";
 import { QBO_MAX_INVOICES, QBO_MAX_ROWS, buildQboCsv, buildSheetCsv, exportFileName, selectDocs } from "@/lib/accounting";
 import { localDate } from "@/lib/backup";
+import { DEFAULT_REGION, formatMoney, isQuebec, type Region } from "@/lib/region";
 
 type T = (typeof i18n)[Lang];
 
@@ -17,9 +18,12 @@ function downloadText(text: string, name: string) {
 }
 
 /** Accounting export (Pro): QuickBooks Online invoice CSV + spreadsheet CSV with TPS/TVQ columns, built locally. */
-export function AccountingExport({ lang, t, history, pro, onUpgrade, onDone }: {
-  lang: Lang; t: T; history: SavedDoc[]; pro: boolean; onUpgrade: () => void; onDone: (msg: string) => void;
+export function AccountingExport({ lang, t, history, pro, onUpgrade, onDone, region = DEFAULT_REGION }: {
+  lang: Lang; t: T; history: SavedDoc[]; pro: boolean; onUpgrade: () => void; onDone: (msg: string) => void; region?: Region;
 }) {
+  const ca = region.country === "CA";
+  // CSV files are French or English (QuickBooks / Excel); Chinese and Arabic interfaces export in English.
+  const sl = baseLang(lang);
   const now = new Date();
   const [from, setFrom] = useState(`${now.getFullYear()}-01-01`);
   const [to, setTo] = useState(localDate(now));
@@ -29,21 +33,23 @@ export function AccountingExport({ lang, t, history, pro, onUpgrade, onDone }: {
   const qbo = useMemo(() => buildQboCsv(inv.docs, {
     product: t.accProduct,
     sitePrefix: lang === "fr" ? "Chantier : " : "Job site: ",
+    region,
+    codeLang: isQuebec(region) ? "fr" : sl,
     discountNote: (pct, qty, unit) => lang === "fr"
-      ? `(${String(qty).replace(".", ",")} × ${unit.toFixed(2).replace(".", ",")} $, remise ${String(pct).replace(".", ",")} % incluse)`
-      : `(${qty} × $${unit.toFixed(2)}, ${pct}% discount included)`,
-  }), [inv, lang, t.accProduct]);
+      ? `(${String(qty).replace(".", ",")} × ${ca ? unit.toFixed(2).replace(".", ",") + " $" : formatMoney(unit, region, sl).replace(/[\u202f\u00a0]/g, " ")}, remise ${String(pct).replace(".", ",")} % incluse)`
+      : `(${qty} × ${ca ? "$" + unit.toFixed(2) : formatMoney(unit, region, sl)}, ${pct}% discount included)`,
+  }), [inv, lang, t.accProduct, region]); // eslint-disable-line react-hooks/exhaustive-deps
   const tooBig = qbo.invoices > QBO_MAX_INVOICES || qbo.rows > QBO_MAX_ROWS;
 
   const exportQbo = () => {
     if (!pro) { onUpgrade(); return; }
-    downloadText(qbo.csv, exportFileName("qbo", range, lang));
+    downloadText(qbo.csv, exportFileName("qbo", range, sl));
     onDone(t.accDone);
   };
   const exportSheet = () => {
     if (!pro) { onUpgrade(); return; }
     const sel = quotes ? selectDocs(history, range, ["invoice", "quote"]) : inv;
-    downloadText(buildSheetCsv(sel.docs, lang), exportFileName("sheet", range, lang));
+    downloadText(buildSheetCsv(sel.docs, sl, region), exportFileName("sheet", range, sl));
     onDone(t.accDone);
   };
   const inp = "border rounded-lg px-3 py-2 text-sm";
@@ -73,7 +79,7 @@ export function AccountingExport({ lang, t, history, pro, onUpgrade, onDone }: {
       {pro && none && <p className="text-xs text-slate-500 mt-2">{t.accNone}</p>}
       <details className="mt-3 text-[11px] text-slate-500">
         <summary className="cursor-pointer">QuickBooks / Excel ?</summary>
-        <p className="mt-1">{t.accQboHelp}</p>
+        <p className="mt-1">{region.country === "US" ? t.accQboHelpUs : t.accQboHelp}</p>
         <p className="mt-1">{t.accSheetHelp}</p>
       </details>
     </section>

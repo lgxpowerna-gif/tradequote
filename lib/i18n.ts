@@ -1,34 +1,44 @@
-export type Lang = "en" | "fr";
+import type { zh as ZhDict } from "./i18n-zh";
+import type { ar as ArDict } from "./i18n-ar";
+
+/** fr (Québec French, default) and en are the main languages; zh (Simplified Chinese) and ar (Arabic, RTL) translate the interface and PDF only. */
+export type Lang = "en" | "fr" | "zh" | "ar";
+/** Languages offered in the switcher, in order. */
+export const LANGS: { code: Lang; label: string }[] = [{ code: "fr", label: "FR" }, { code: "en", label: "EN" }, { code: "zh", label: "中文" }, { code: "ar", label: "العربية" }];
+export const isRtl = (l: Lang) => l === "ar";
+/** Language for things that exist only in French/English (document numbers, CSV exports): French stays French, others use English. */
+export const baseLang = (l: Lang): "fr" | "en" => (l === "fr" ? "fr" : "en");
+export const isLang = (v: unknown): v is Lang => v === "fr" || v === "en" || v === "zh" || v === "ar";
 
 export { TAX_PRESETS } from "./tax";
 
-const L = (en: string, fr: string) => ({ en, fr });
+const L = (en: string, fr: string, zh: string, ar: string) => ({ en, fr, zh, ar });
 
 export const TEMPLATES = [
-  { id: "reno", label: { en: "Renovation", fr: "Rénovation" }, items: [{ description: L("Labour – renovation work", "Main-d'œuvre – travaux de rénovation"), quantity: 1, unitPrice: 0 }, { description: L("Materials", "Matériaux"), quantity: 1, unitPrice: 0 }] },
-  { id: "plumbing", label: { en: "Plumbing", fr: "Plomberie" }, items: [{ description: L("Service call / diagnostic", "Appel de service / diagnostic"), quantity: 1, unitPrice: 95 }, { description: L("Labour", "Main-d'œuvre"), quantity: 2, unitPrice: 85 }, { description: L("Parts / materials", "Pièces / matériaux"), quantity: 1, unitPrice: 0 }] },
-  { id: "electrical", label: { en: "Electrical", fr: "Électricité" }, items: [{ description: L("Electrical labour", "Main-d'œuvre électrique"), quantity: 1, unitPrice: 0 }, { description: L("Materials & devices", "Matériel et dispositifs"), quantity: 1, unitPrice: 0 }] },
-  { id: "painting", label: { en: "Painting", fr: "Peinture" }, items: [{ description: L("Surface prep", "Préparation des surfaces"), quantity: 1, unitPrice: 0 }, { description: L("Painting labour", "Main-d'œuvre peinture"), quantity: 1, unitPrice: 0 }, { description: L("Paint & supplies", "Peinture et fournitures"), quantity: 1, unitPrice: 0 }] },
-  { id: "general", label: { en: "General", fr: "Général" }, items: [{ description: L("Professional services", "Services professionnels"), quantity: 1, unitPrice: 0 }] },
+  { id: "reno", label: { en: "Renovation", fr: "Rénovation", zh: "装修", ar: "ترميم" }, items: [{ description: L("Labour – renovation work", "Main-d'œuvre – travaux de rénovation", "人工 – 装修工程", "اليد العاملة – أعمال الترميم"), quantity: 1, unitPrice: 0 }, { description: L("Materials", "Matériaux", "材料", "المواد"), quantity: 1, unitPrice: 0 }] },
+  { id: "plumbing", label: { en: "Plumbing", fr: "Plomberie", zh: "水管", ar: "سباكة" }, items: [{ description: L("Service call / diagnostic", "Appel de service / diagnostic", "上门服务 / 诊断", "زيارة خدمة / تشخيص"), quantity: 1, unitPrice: 95 }, { description: L("Labour", "Main-d'œuvre", "人工", "اليد العاملة"), quantity: 2, unitPrice: 85 }, { description: L("Parts / materials", "Pièces / matériaux", "零件 / 材料", "قطع / مواد"), quantity: 1, unitPrice: 0 }] },
+  { id: "electrical", label: { en: "Electrical", fr: "Électricité", zh: "电工", ar: "كهرباء" }, items: [{ description: L("Electrical labour", "Main-d'œuvre électrique", "电工人工", "اليد العاملة الكهربائية"), quantity: 1, unitPrice: 0 }, { description: L("Materials & devices", "Matériel et dispositifs", "材料和电气设备", "المواد والأجهزة"), quantity: 1, unitPrice: 0 }] },
+  { id: "painting", label: { en: "Painting", fr: "Peinture", zh: "油漆", ar: "دهان" }, items: [{ description: L("Surface prep", "Préparation des surfaces", "表面处理", "تحضير الأسطح"), quantity: 1, unitPrice: 0 }, { description: L("Painting labour", "Main-d'œuvre peinture", "油漆人工", "اليد العاملة للدهان"), quantity: 1, unitPrice: 0 }, { description: L("Paint & supplies", "Peinture et fournitures", "油漆和耗材", "الدهان واللوازم"), quantity: 1, unitPrice: 0 }] },
+  { id: "general", label: { en: "General", fr: "Général", zh: "通用", ar: "عام" }, items: [{ description: L("Professional services", "Services professionnels", "专业服务", "خدمات مهنية"), quantity: 1, unitPrice: 0 }] },
   {
-    id: "roofing", label: { en: "Roofing", fr: "Toiture" },
+    id: "roofing", label: { en: "Roofing", fr: "Toiture", zh: "屋顶", ar: "أسقف" },
     items: [
-      { description: L("Tear-off of existing roofing (per sq. ft.)", "Retrait de l'ancien revêtement de toiture (par pi²)"), quantity: 1, unitPrice: 0 },
-      { description: L("Replacement of damaged roof decking (per 4×8 sheet)", "Remplacement de contreplaqué endommagé (par feuille 4×8)"), quantity: 1, unitPrice: 0 },
-      { description: L("Ice and water shield membrane – eaves and valleys (per roll)", "Membrane autocollante (glace et eau) – avant-toits et noues (par rouleau)"), quantity: 1, unitPrice: 0 },
-      { description: L("Synthetic underlayment (per roll)", "Sous-couche synthétique (par rouleau)"), quantity: 1, unitPrice: 0 },
-      { description: L("Asphalt shingles (per bundle)", "Bardeaux d'asphalte (par paquet)"), quantity: 1, unitPrice: 0 },
-      { description: L("Ridge cap shingles (per bundle)", "Bardeaux de faîtière (par paquet)"), quantity: 1, unitPrice: 0 },
-      { description: L("Flashing and drip edge (chimney, walls, valleys)", "Solins et larmiers (cheminée, murs, noues)"), quantity: 1, unitPrice: 0 },
-      { description: L("Roof vents / ventilation (each)", "Évents de toit / ventilation (par unité)"), quantity: 1, unitPrice: 0 },
-      { description: L("Dumpster rental and debris disposal", "Conteneur et disposition des débris"), quantity: 1, unitPrice: 0 },
-      { description: L("Labour – installation (per hour)", "Main-d'œuvre – pose (par heure)"), quantity: 1, unitPrice: 0 },
+      { description: L("Tear-off of existing roofing (per sq. ft.)", "Retrait de l'ancien revêtement de toiture (par pi²)", "拆除旧屋面（每平方英尺）", "إزالة غطاء السقف القديم (لكل قدم مربعة)"), quantity: 1, unitPrice: 0 },
+      { description: L("Replacement of damaged roof decking (per 4×8 sheet)", "Remplacement de contreplaqué endommagé (par feuille 4×8)", "更换损坏的屋面板（每张 4×8）", "استبدال ألواح السقف التالفة (لكل لوح 4×8)"), quantity: 1, unitPrice: 0 },
+      { description: L("Ice and water shield membrane – eaves and valleys (per roll)", "Membrane autocollante (glace et eau) – avant-toits et noues (par rouleau)", "防冰防水卷材 – 檐口和天沟（每卷）", "غشاء عازل للجليد والماء – الأفاريز والأودية (لكل لفة)"), quantity: 1, unitPrice: 0 },
+      { description: L("Synthetic underlayment (per roll)", "Sous-couche synthétique (par rouleau)", "合成防水垫层（每卷）", "طبقة سفلية اصطناعية (لكل لفة)"), quantity: 1, unitPrice: 0 },
+      { description: L("Asphalt shingles (per bundle)", "Bardeaux d'asphalte (par paquet)", "沥青瓦（每捆）", "ألواح أسفلتية (لكل حزمة)"), quantity: 1, unitPrice: 0 },
+      { description: L("Ridge cap shingles (per bundle)", "Bardeaux de faîtière (par paquet)", "屋脊瓦（每捆）", "ألواح التلّة (لكل حزمة)"), quantity: 1, unitPrice: 0 },
+      { description: L("Flashing and drip edge (chimney, walls, valleys)", "Solins et larmiers (cheminée, murs, noues)", "泛水板和滴水边（烟囱、墙面、天沟）", "ألواح الحماية وحواف التقطير (المدخنة والجدران والأودية)"), quantity: 1, unitPrice: 0 },
+      { description: L("Roof vents / ventilation (each)", "Évents de toit / ventilation (par unité)", "屋顶通风口（每个）", "فتحات تهوية السقف (لكل وحدة)"), quantity: 1, unitPrice: 0 },
+      { description: L("Dumpster rental and debris disposal", "Conteneur et disposition des débris", "垃圾箱租赁和废料清运", "استئجار حاوية والتخلص من المخلفات"), quantity: 1, unitPrice: 0 },
+      { description: L("Labour – installation (per hour)", "Main-d'œuvre – pose (par heure)", "人工 – 安装（每小时）", "اليد العاملة – التركيب (لكل ساعة)"), quantity: 1, unitPrice: 0 },
     ],
   },
-  { id: "change", label: { en: "Change order", fr: "Avenant (extra)" }, items: [{ description: L("Additional work – change order", "Travaux supplémentaires – avenant"), quantity: 1, unitPrice: 0 }, { description: L("Materials for change order", "Matériaux pour l'avenant"), quantity: 1, unitPrice: 0 }] },
+  { id: "change", label: { en: "Change order", fr: "Avenant (extra)", zh: "变更单（追加）", ar: "أمر تغيير (إضافي)" }, items: [{ description: L("Additional work – change order", "Travaux supplémentaires – avenant", "追加工程 – 变更单", "أعمال إضافية – أمر تغيير"), quantity: 1, unitPrice: 0 }, { description: L("Materials for change order", "Matériaux pour l'avenant", "变更单材料", "مواد أمر التغيير"), quantity: 1, unitPrice: 0 }] },
 ] as const;
 
-export const i18n = {
+const base = {
   en: {
     brand: "TradeQuote", create: "Create", history: "History", pricing: "Pricing", upgrade: "Go Pro", free: "Free plan", pro: "Pro",
     quote: "Quote", invoice: "Invoice", templates: "Quick templates", business: "Your business", client: "Client",
@@ -36,7 +46,7 @@ export const i18n = {
     subtotal: "Subtotal", total: "Total", deposit: "Deposit %", depositAmt: "Deposit amount", balance: "Balance due",
     download: "Download PDF", convert: "Convert to Invoice", limitHit: "Free limit reached — upgrade to keep closing jobs",
     limitText: "You've used your 5 free documents this month. Go Pro for unlimited quotes & invoices — one paid job covers a year.",
-    monthly: "Pro – $19/mo", yearly: "Pro – $190/yr (2 months free, save $38)", continueFree: "Continue free", freePlan: "Free", proPlan: "Pro", perMo: "/mo",
+    monthly: "Pro – $19 CAD/month", yearly: "Pro – $190 CAD/year (2 months free, save $38)", continueFree: "Continue free", freePlan: "Free", proPlan: "Pro", perMo: "/mo",
     featureFree: ["5 documents / month", "Quotes + Invoices", "RBQ licence on every document", "GST + QST computed separately", "Full history: reopen and duplicate", "Share / email + calendar (Google, Outlook, Apple)", "Trade templates incl. Roofing"],
     featurePro: ["Unlimited quotes & invoices", "No watermark", "Accounting export: QuickBooks Online CSV", "Excel CSV with GST/QST columns", "Everything in Free"],
     startMo: "Start $19/mo CAD", startYr: "Best value — $190/yr CAD (2 months free)",
@@ -104,6 +114,14 @@ export const i18n = {
     obTitle: "Welcome to TradeQuote", obStep: "Step", obOf: "of", ob1Title: "Your business", ob1Text: "This information appears on your quotes and invoices.",
     ob2Title: "Taxes and logo (optional)", ob2Text: "Your GST and QST numbers are printed on your documents if you are registered. You can add them later.",
     ob3Title: "Your trade", ob3Text: "Pick a template to start your first quote with ready-made lines.", obNext: "Next", obBack: "Back", obSkip: "Skip setup",
+    region: "Region", country: "Country", province: "Province / territory", usState: "State", pickState: "— Choose —",
+    regionHint: "Sets taxes, currency, date format and the default language.", language: "Language",
+    madeFor: "Made for Québec.", alsoAvail: "Also available across Canada, in the United States and in France.",
+    cadNote: "Prices are in Canadian dollars (CAD). Outside Canada, your card issuer converts the amount to your currency.",
+    stateRate: "Sales tax %", localRate: "Local tax % (optional)", usTaxHint: "Enter the rates that apply where the work is done (they vary by state, county and city).",
+    vatDoc: "VAT rate (all lines)", vatCol: "VAT", subtotalHT: "Subtotal excl. VAT", totalTTC: "Total incl. VAT",
+    franchiseHint: "No VAT is charged. This mention is printed on the document:", ob1TextOther: "This information appears on your quotes and invoices. Choose your region first: it sets your taxes.",
+    ob2TextOther: "Optional: registration numbers printed on your documents, and your logo.", accQboHelpUs: "In QuickBooks Online: Settings ⚙ › Import data › Invoices. Choose the MM/DD/YYYY date format; lines are marked TAX or NON so QuickBooks applies your sales tax settings. Tick “add new customers / products” if needed. Discounts are included in the line amounts (QuickBooks doesn't import negative lines).",
     obFinish: "Finish", obNoTpl: "Start without a template", obDone: "Setup complete ✓", obLater: "You can change everything later in “Your business”.",
   },
   fr: {
@@ -181,6 +199,33 @@ export const i18n = {
     obTitle: "Bienvenue sur TradeQuote", obStep: "Étape", obOf: "sur", ob1Title: "Votre entreprise", ob1Text: "Ces renseignements apparaissent sur vos soumissions et factures.",
     ob2Title: "Taxes et logo (facultatif)", ob2Text: "Vos numéros de TPS et de TVQ sont imprimés sur vos documents si vous êtes inscrit. Vous pourrez les ajouter plus tard.",
     ob3Title: "Votre métier", ob3Text: "Choisissez un modèle pour commencer votre première soumission avec des lignes déjà prêtes.", obNext: "Suivant", obBack: "Retour", obSkip: "Passer la configuration",
+    region: "Région", country: "Pays", province: "Province / territoire", usState: "État", pickState: "— Choisir —",
+    regionHint: "Détermine les taxes, la devise, le format des dates et la langue par défaut.", language: "Langue",
+    madeFor: "Fait pour le Québec.", alsoAvail: "Aussi disponible partout au Canada, aux États-Unis et en France.",
+    cadNote: "Les prix sont en dollars canadiens (CAD). Hors Canada, l'émetteur de votre carte convertit le montant dans votre devise.",
+    stateRate: "Taxe de vente %", localRate: "Taxe locale % (facultatif)", usTaxHint: "Entrez les taux en vigueur là où les travaux sont faits (ils varient selon l'État, le comté et la ville).",
+    vatDoc: "Taux de TVA (toutes les lignes)", vatCol: "TVA", subtotalHT: "Sous-total HT", totalTTC: "Total TTC",
+    franchiseHint: "Aucune TVA n'est facturée. Cette mention est imprimée sur le document :", ob1TextOther: "Ces renseignements apparaissent sur vos soumissions et factures. Choisissez d'abord votre région : elle détermine vos taxes.",
+    ob2TextOther: "Facultatif : numéros d'immatriculation imprimés sur vos documents, et votre logo.", accQboHelpUs: "Dans QuickBooks Online : Paramètres ⚙ › Importer des données › Factures. Choisissez le format de date MM/JJ/AAAA ; les lignes sont marquées TAX ou NON pour que QuickBooks applique vos réglages de taxe de vente. Cochez « ajouter les nouveaux clients / produits » au besoin. Les remises sont incluses dans le montant des lignes.",
     obFinish: "Terminer", obNoTpl: "Commencer sans modèle", obDone: "Configuration terminée ✓", obLater: "Vous pourrez tout modifier plus tard dans « Votre entreprise ».",
   },
 } as const;
+
+type Dict = (typeof base)["en"] | (typeof base)["fr"];
+/**
+ * Interface strings. French and English are bundled; Chinese and Arabic are loaded on demand
+ * (loadLang) so Québec / French users download nothing extra. Until loaded they fall back to English.
+ */
+export const i18n: { en: (typeof base)["en"]; fr: (typeof base)["fr"]; zh: Dict; ar: Dict } = { en: base.en, fr: base.fr, zh: base.en, ar: base.en };
+const loaded: Partial<Record<Lang, boolean>> = { en: true, fr: true };
+export const langLoaded = (l: Lang) => !!loaded[l];
+/** Loads the Chinese or Arabic dictionary (no-op for French / English). */
+export async function loadLang(l: Lang): Promise<void> {
+  if (loaded[l]) return;
+  if (l === "zh") i18n.zh = (await import("./i18n-zh")).zh as unknown as Dict;
+  else if (l === "ar") i18n.ar = (await import("./i18n-ar")).ar as unknown as Dict;
+  loaded[l] = true;
+}
+
+/** Compile-time check: every language has every key of the English dictionary. */
+const _keys: Record<"zh" | "ar" | "fr", Record<keyof typeof base.en, unknown>> = { fr: base.fr, zh: {} as typeof ZhDict, ar: {} as typeof ArDict }; // eslint-disable-line @typescript-eslint/no-unused-vars

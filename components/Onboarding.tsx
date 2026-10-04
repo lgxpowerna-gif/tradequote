@@ -1,23 +1,29 @@
 "use client";
 import { useState } from "react";
-import { TEMPLATES, type i18n, type Lang } from "@/lib/i18n";
+import { LANGS, TEMPLATES, type i18n, type Lang } from "@/lib/i18n";
 import { formatRbq, isValidRbq } from "@/lib/rbq";
 import type { Logo } from "@/lib/logo";
 import { LogoPicker } from "@/components/LogoPicker";
+import { RegionSelect } from "@/components/RegionSelect";
+import { bizFields, isQuebec, type Region } from "@/lib/region";
 
 type T = (typeof i18n)[Lang];
-type Biz = { name: string; rbq: string; gst: string; qst: string };
+type Biz = { name: string; rbq: string; gst: string; qst: string; pst?: string; licence?: string; regNo?: string; vatNo?: string; bn?: string };
 
 /** Key set once the first-run setup is finished or skipped: it is never shown again. */
 export const ONBOARDED_KEY = "tq_onboarded";
 
 /**
- * Short first-run setup (3 steps, skippable): business name + RBQ, then TPS/TVQ numbers and logo
- * (optional), then a trade template. Only shown to new users (no business name, no document).
+ * Short first-run setup (3 steps, skippable): region + language, business name + RBQ (Québec) or
+ * licence (elsewhere), then tax/registration numbers and logo (optional), then a trade template.
+ * Only shown to new users (no business name, no document).
  */
-export function Onboarding({ t, lang, biz, onBiz, logo, onLogo, onClose }: {
+export function Onboarding({ t, lang, biz, onBiz, logo, onLogo, onClose, region, onRegion, onLang }: {
   t: T;
   lang: Lang;
+  region: Region;
+  onRegion: (r: Region) => void;
+  onLang: (l: Lang) => void;
   biz: Biz;
   onBiz: (b: Partial<Biz>) => void;
   logo: Logo | null;
@@ -27,7 +33,11 @@ export function Onboarding({ t, lang, biz, onBiz, logo, onLogo, onClose }: {
 }) {
   const [step, setStep] = useState(1);
   const inp = "w-full border rounded-lg px-3 py-2.5 text-sm";
-  const rbqBad = !!biz.rbq && !isValidRbq(biz.rbq);
+  const qc = isQuebec(region);
+  const rbqBad = qc && !!biz.rbq && !isValidRbq(biz.rbq);
+  const fields = bizFields(region, lang);
+  const licence = fields.find((f) => f.key === "licence");
+  const regFields = fields.filter((f) => f.key !== "licence" && f.key !== "interac");
   const titles = [t.ob1Title, t.ob2Title, t.ob3Title];
   return (
     <div className="fixed inset-0 z-40 bg-black/40 flex items-end sm:items-center justify-center sm:p-4" role="dialog" aria-modal="true" aria-labelledby="onb-title" data-testid="onb">
@@ -41,24 +51,51 @@ export function Onboarding({ t, lang, biz, onBiz, logo, onLogo, onClose }: {
 
         {step === 1 && (
           <div className="space-y-3">
-            <p className="text-sm text-slate-600">{t.ob1Text}</p>
+            <p className="text-sm text-slate-600">{qc ? t.ob1Text : t.ob1TextOther}</p>
+            <div className="rounded-xl border bg-slate-50 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-slate-700">{t.region}</span>
+                <select value={lang} onChange={(e) => onLang(e.target.value as Lang)} aria-label={`${t.language} / Langue / Language`} className="text-xs border rounded-md px-2 py-1 bg-white" data-testid="onb-lang">
+                  {LANGS.map(({ code, label }) => <option key={code} value={code}>{label}</option>)}
+                </select>
+              </div>
+              <RegionSelect t={t} lang={lang} region={region} onChange={onRegion} testPrefix="onb" />
+              <p className="text-[11px] text-slate-400">{t.regionHint}</p>
+            </div>
             <label className="block text-xs text-slate-600">{t.companyName}
               <input autoFocus value={biz.name} onChange={(e) => onBiz({ name: e.target.value })} className={inp} data-testid="onb-name" />
             </label>
-            <label className="block text-xs text-slate-600">{t.rbq}
-              <input inputMode="numeric" value={biz.rbq} onChange={(e) => onBiz({ rbq: formatRbq(e.target.value) })} className={`${inp} ${rbqBad ? "border-red-400" : ""}`} aria-invalid={rbqBad} data-testid="onb-rbq" />
-            </label>
-            <p className={`text-[11px] ${rbqBad ? "text-red-600" : "text-slate-400"}`}>{rbqBad ? t.rbqInvalid : t.rbqHint}</p>
+            {qc ? (<>
+              <label className="block text-xs text-slate-600">{t.rbq}
+                <input inputMode="numeric" value={biz.rbq} onChange={(e) => onBiz({ rbq: formatRbq(e.target.value) })} className={`${inp} ${rbqBad ? "border-red-400" : ""}`} aria-invalid={rbqBad} data-testid="onb-rbq" />
+              </label>
+              <p className={`text-[11px] ${rbqBad ? "text-red-600" : "text-slate-400"}`}>{rbqBad ? t.rbqInvalid : t.rbqHint}</p>
+            </>) : licence && (<>
+              <label className="block text-xs text-slate-600">{licence.label}
+                <input value={biz.licence || ""} onChange={(e) => onBiz({ licence: e.target.value.slice(0, 120) })} className={inp} data-testid="onb-licence" />
+              </label>
+              <p className="text-[11px] text-slate-400" data-testid="onb-licence-hint">{licence.hint}</p>
+            </>)}
           </div>
         )}
 
         {step === 2 && (
           <div className="space-y-3">
-            <p className="text-sm text-slate-600">{t.ob2Text}</p>
-            <div className="grid sm:grid-cols-2 gap-3">
-              <label className="block text-xs text-slate-600">{t.gst}<input value={biz.gst} onChange={(e) => onBiz({ gst: e.target.value })} className={inp} data-testid="onb-gst" /></label>
-              <label className="block text-xs text-slate-600">{t.qst}<input value={biz.qst} onChange={(e) => onBiz({ qst: e.target.value })} className={inp} data-testid="onb-qst" /></label>
-            </div>
+            <p className="text-sm text-slate-600">{qc ? t.ob2Text : t.ob2TextOther}</p>
+            {qc ? (
+              <div className="grid sm:grid-cols-2 gap-3">
+                <label className="block text-xs text-slate-600">{t.gst}<input value={biz.gst} onChange={(e) => onBiz({ gst: e.target.value })} className={inp} data-testid="onb-gst" /></label>
+                <label className="block text-xs text-slate-600">{t.qst}<input value={biz.qst} onChange={(e) => onBiz({ qst: e.target.value })} className={inp} data-testid="onb-qst" /></label>
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 gap-3">
+                {regFields.map((f) => (
+                  <label key={f.key} className="block text-xs text-slate-600">{f.label}
+                    <input value={biz[f.key as keyof Biz] || ""} onChange={(e) => onBiz({ [f.key]: e.target.value })} className={inp} data-testid={`onb-${f.key}`} />
+                  </label>
+                ))}
+              </div>
+            )}
             <LogoPicker t={t} logo={logo} onChange={onLogo} />
           </div>
         )}
