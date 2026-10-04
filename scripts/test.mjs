@@ -26,6 +26,7 @@ const test = async (name, fn) => {
 };
 
 const tax = await load("lib/tax.ts");
+const regionLib = await load("lib/region.ts");
 const plan = await load("lib/plan.ts");
 
 console.log("tax");
@@ -181,7 +182,7 @@ await test("parse: clear error codes for invalid files", () => {
   assert.deepEqual(backup.parseBackup("   "), { ok: false, error: "empty" });
   assert.deepEqual(backup.parseBackup("[]"), { ok: false, error: "wrongApp" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ format: "facturepro-backup", version: 1, data: {} })), { ok: false, error: "wrongApp" });
-  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: 5 })), { ok: false, error: "newerVersion" });
+  assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: 6 })), { ok: false, error: "newerVersion" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, version: "1" })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: { history: "x" } })), { ok: false, error: "badShape" });
   assert.deepEqual(backup.parseBackup(JSON.stringify({ ...ok, data: { company: [] } })), { ok: false, error: "badShape" });
@@ -591,6 +592,163 @@ await test(".ics: RFC 5545 structure, escaping, CRLF, folding at 75 octets", () 
   assert.ok(unfolded.includes("SUMMARY:Travaux – " + "Jean Tremblay ".repeat(6).trim() + " (S-2026-0001)"));
   assert.equal(schedule.icsFileName(si), "travaux-S-2026-0001.ics");
   assert.equal(schedule.buildIcs({ ...si, jobDate: "" }), null);
+});
+
+
+console.log("regions: taxes");
+const ct = (items, disc, preset, opts = {}, custom = 0) => docsLib.computeTotals(items, disc, preset, custom, 0, "fr", opts);
+const one = (amt) => [{ description: "a", quantity: 1, unitPrice: amt }];
+await test("QC unchanged: TPS 5 % + TVQ 9.975 %, each rounded to the cent", () => {
+  const t = ct(one(1234.56), 0, "gst-qst-qc");
+  assert.deepEqual(t.taxLines.map((l) => [l.code, l.label, l.rate, l.amount]), [["gst", "TPS", 5, 61.73], ["qst", "TVQ", 9.975, 123.15]]);
+  assert.equal(t.total, 1419.44);
+  assert.equal(t.taxLines[0].base, undefined);
+});
+await test("ON HST 13 %, NS HST 14 %, NB/NL/PE HST 15 %", () => {
+  assert.deepEqual(ct(one(999.99), 0, "hst-on").taxLines.map((l) => [l.code, l.rate, l.amount]), [["hst", 13, 130]]);
+  assert.equal(ct(one(999.99), 0, "hst-on").total, 1129.99);
+  assert.deepEqual(ct(one(100.05), 0, "hst-ns").taxLines.map((l) => [l.rate, l.amount]), [[14, 14.01]]);
+  assert.deepEqual(ct(one(100.1), 0, "hst-nb").taxLines.map((l) => [l.rate, l.amount]), [[15, 15.02]]);
+  for (const sub of ["NB", "NL", "PE"]) assert.equal(regionLib.defaultTaxPreset({ country: "CA", sub }), "hst-nb");
+  assert.equal(regionLib.defaultTaxPreset({ country: "CA", sub: "NS" }), "hst-ns");
+});
+await test("BC GST+PST 7 %, SK GST+PST 6 %, MB GST+RST 7 %, AB/territories GST only (each tax rounded)", () => {
+  assert.deepEqual(ct(one(333.33), 0, "gst-pst-bc").taxLines.map((l) => [l.code, l.amount]), [["gst", 16.67], ["pst", 23.33]]);
+  assert.equal(ct(one(333.33), 0, "gst-pst-bc").total, 373.33);
+  assert.deepEqual(ct(one(333.33), 0, "gst-pst-sk").taxLines.map((l) => l.amount), [16.67, 20]);
+  assert.deepEqual(ct(one(333.33), 0, "gst-rst-mb").taxLines.map((l) => [l.code, l.amount]), [["gst", 16.67], ["rst", 23.33]]);
+  for (const sub of ["AB", "YT", "NT", "NU"]) assert.equal(regionLib.defaultTaxPreset({ country: "CA", sub }), "gst");
+});
+await test("US: user-entered state rate + optional local tax", () => {
+  const t = ct(one(1000), 10, "us-sales", { localRate: 2.25 }, 6.25);
+  assert.deepEqual(t.taxLines.map((l) => [l.code, l.label, l.rate, l.amount]), [["sales", "Taxe de vente", 6.25, 56.25], ["local", "Taxe locale", 2.25, 20.25]]);
+  assert.equal(t.total, 976.5);
+  assert.deepEqual(ct(one(1000), 0, "us-sales", {}, 0).taxLines, []);
+  assert.equal(docsLib.computeTotals(one(10), 0, "us-sales", 7, 0, "en").taxLines[0].label, "Sales tax");
+});
+await test("FR: TVA per line (20 / 10 / 5,5 %), discount pro rata, base then TVA rounded", () => {
+  const items = [{ description: "Fourniture", quantity: 1, unitPrice: 1000, vatRate: 20 }, { description: "Pose", quantity: 3, unitPrice: 333.33, vatRate: 10 }, { description: "Isolation", quantity: 1, unitPrice: 500, vatRate: 5.5 }];
+  const t = ct(items, 5, "fr-tva");
+  assert.equal(t.subtotal, 2499.99); assert.equal(t.discountAmount, 125);
+  assert.deepEqual(t.taxLines.map((l) => [l.label, l.rate, l.base, l.amount]), [["TVA", 20, 950, 190], ["TVA", 10, 949.99, 95], ["TVA", 5.5, 475, 26.13]]);
+  assert.equal(t.total, 2686.12);
+  // no line rate -> the document rate, else 20 %; invalid rates ignored
+  assert.deepEqual(ct(one(100), 0, "fr-tva", { docVat: 10 }).taxLines.map((l) => l.rate), [10]);
+  assert.deepEqual(ct([{ description: "x", quantity: 1, unitPrice: 100, vatRate: 7 }], 0, "fr-tva").taxLines.map((l) => [l.rate, l.amount]), [[20, 20]]);
+});
+await test("FR franchise (293 B / CIBS): no VAT lines, legal mention", () => {
+  const t = ct(one(1500), 0, "fr-franchise-293b");
+  assert.deepEqual(t.taxLines, []); assert.equal(t.total, 1500);
+  assert.match(tax.presetOf("fr-franchise-293b").mention.fr, /293 B du CGI/);
+  assert.match(tax.presetOf("fr-franchise-cibs").mention.fr, /CIBS/);
+});
+await test("BE TVA 21 / 12 / 6 % and CH TVA 8,1 / 2,6 / 3,8 %", () => {
+  assert.deepEqual(tax.presetOf("be-tva").vat.rates, [21, 12, 6]);
+  assert.deepEqual(ct([{ description: "a", quantity: 1, unitPrice: 100, vatRate: 6 }, { description: "b", quantity: 1, unitPrice: 50 }], 0, "be-tva").taxLines.map((l) => [l.rate, l.amount]), [[21, 10.5], [6, 6]]);
+  assert.deepEqual(tax.presetOf("ch-tva").vat.rates, [8.1, 2.6, 3.8]);
+  assert.deepEqual(ct(one(123.45), 0, "ch-tva").taxLines.map((l) => [l.rate, l.amount]), [[8.1, 10]]);
+  assert.equal(ct(one(123.45), 0, "ch-tva").total, 133.45);
+});
+await test("formatRate / presetLabelOf in fr, en, zh, ar", () => {
+  assert.equal(tax.formatRate(9.975, "fr"), "9,975 %"); assert.equal(tax.formatRate(9.975, "en"), "9.975%");
+  assert.equal(tax.formatRate(5.5, "zh"), "5.5%"); assert.equal(tax.formatRate(5.5, "ar"), "5.5%");
+  const qc = tax.presetOf("gst-qst-qc");
+  assert.equal(tax.presetLabelOf(qc, "fr"), qc.label.fr);
+  assert.match(tax.presetLabelOf(qc, "zh"), /魁北克/); assert.match(tax.presetLabelOf(qc, "ar"), /كيبيك/);
+  assert.equal(docsLib.computeTotals(one(10), 0, "gst-qst-qc", 0, 0, "zh").taxLines[0].amount, 0.5);
+});
+
+console.log("regions: helpers");
+await test("sanitizeRegion: absent/invalid -> Québec; defaultLang never zh/ar", () => {
+  for (const v of [undefined, null, "x", {}, { country: "XX", sub: "QC" }, { country: "CA", sub: "ZZ" }]) assert.deepEqual(regionLib.sanitizeRegion(v), { country: "CA", sub: "QC" });
+  assert.deepEqual(regionLib.sanitizeRegion({ country: "US", sub: "TX" }), { country: "US", sub: "TX" });
+  assert.deepEqual(regionLib.sanitizeRegion({ country: "FR", sub: "75" }), { country: "FR", sub: "" });
+  assert.equal(regionLib.defaultLang(regionLib.DEFAULT_REGION), "fr");
+  assert.equal(regionLib.defaultLang({ country: "CA", sub: "ON" }), "en");
+  assert.equal(regionLib.defaultLang({ country: "FR", sub: "" }), "fr");
+  assert.equal(regionLib.defaultTaxPreset(regionLib.DEFAULT_REGION), "gst-qst-qc");
+  assert.equal(regionLib.taxPresetsFor(regionLib.DEFAULT_REGION)[0], "gst-qst-qc");
+});
+await test("formatDate / formatMoney per region (Québec unchanged)", () => {
+  assert.equal(regionLib.formatDate("2026-10-03", { country: "CA", sub: "QC" }), "2026-10-03");
+  assert.equal(regionLib.formatDate("2026-10-03", { country: "US", sub: "NY" }), "10/03/2026");
+  assert.equal(regionLib.formatDate("2026-10-03", { country: "FR", sub: "" }), "03/10/2026");
+  assert.equal(regionLib.formatDate("2026-10-03", { country: "CH", sub: "" }), "03.10.2026");
+  const qc = regionLib.formatMoney(1234.5, regionLib.DEFAULT_REGION, "fr");
+  assert.equal(qc, new Intl.NumberFormat("fr-CA", { style: "currency", currency: "CAD" }).format(1234.5));
+  assert.match(regionLib.formatMoney(1234.5, { country: "FR", sub: "" }, "fr"), /€/);
+  assert.match(regionLib.formatMoney(1234.5, { country: "US", sub: "NY" }, "en"), /^\$1,234\.50$/);
+});
+await test("bizFields / registrationLines: Québec identical to before, RBQ only in Québec", () => {
+  assert.deepEqual(regionLib.bizFields(regionLib.DEFAULT_REGION, "fr").map((f) => f.key), ["bn", "gst", "qst", "rbq", "interac"]);
+  const c = { bn: "1170000000", gst: "123456789 RT0001", qst: "1234567890 TQ0001", licence: "X" };
+  assert.deepEqual(regionLib.registrationLines(c, regionLib.DEFAULT_REGION, "fr"), ["NEQ : 1170000000", "N° TPS/TVH : 123456789 RT0001", "N° TVQ : 1234567890 TQ0001"]);
+  assert.deepEqual(regionLib.registrationLines(c, regionLib.DEFAULT_REGION, "en"), ["BN : 1170000000", "GST/HST # : 123456789 RT0001", "QST # : 1234567890 TQ0001"]);
+  for (const r of [{ country: "CA", sub: "ON" }, { country: "US", sub: "CA" }, { country: "FR", sub: "" }, { country: "BE", sub: "" }, { country: "CH", sub: "" }]) {
+    const keys = regionLib.bizFields(r, "en").map((f) => f.key);
+    assert.ok(!keys.includes("rbq") && keys.includes("licence"), JSON.stringify(r));
+  }
+  assert.deepEqual(regionLib.registrationLines({ regNo: "123 456 789 00012", vatNo: "FR12123456789" }, { country: "FR", sub: "" }, "fr"), ["SIRET : 123 456 789 00012", "N° TVA intracommunautaire : FR12123456789"]);
+  assert.equal(regionLib.paymentLabel(regionLib.DEFAULT_REGION, "fr"), "Virement Interac :");
+});
+
+console.log("regions: exports");
+const rdoc = (id, number, preset, items, opts = {}, custom = 0) => {
+  const t = docsLib.computeTotals(items, 0, preset, custom, 0, "fr", opts);
+  const d = { client: { name: "Client", address: "", city: "", email: "" }, jobSite: "", jobDate: "", due: "2026-10-31", notes: "", items, taxPreset: preset, customRate: custom, discountPct: 0, depositPct: 0, ...opts, ...t };
+  return { id, type: "invoice", number, clientName: "Client", total: d.total, date: "2026-10-02", doc: d };
+};
+await test("Excel CSV: Québec default columns unchanged (TPS/TVQ/TVH/Autre)", () => {
+  const csv = accounting.buildSheetCsv([fdoc("1", "F-2026-0001", "2026-10-02")], "fr");
+  assert.equal(csv, accounting.buildSheetCsv([fdoc("1", "F-2026-0001", "2026-10-02")], "fr", { country: "CA", sub: "QC" }));
+  assert.ok(csv.split("\r\n")[0].includes(";TPS;TVQ;TVH;Autre taxe (TVP/TVD);Total des taxes;Total;"));
+});
+await test("Excel CSV: US sales/local columns, FR base HT + TVA per rate", () => {
+  const us = accounting.buildSheetCsv([rdoc("1", "INV-1", "us-sales", one(100), { localRate: 1 }, 8)], "en", { country: "US", sub: "NY" }).split("\r\n");
+  assert.ok(us[0].includes(",Sales tax,Local tax,Other tax,Total tax,Total,"));
+  assert.ok(us[1].includes(",100.00,8.00,1.00,0.00,9.00,109.00,"));
+  const fr = accounting.buildSheetCsv([rdoc("1", "F-1", "fr-tva", [{ description: "a", quantity: 1, unitPrice: 100, vatRate: 20 }, { description: "b", quantity: 1, unitPrice: 200, vatRate: 5.5 }])], "fr", { country: "FR", sub: "" }).split("\r\n");
+  assert.ok(fr[0].includes(";Montant HT;Base HT 20 %;TVA 20 %;Base HT 10 %;TVA 10 %;Base HT 5,5 %;TVA 5,5 %;Autre taxe;Total TVA;Total TTC;"));
+  assert.ok(fr[1].includes(";300,00;100,00;20,00;0,00;0,00;200,00;11,00;0,00;31,00;331,00;"));
+});
+await test("QBO: tax codes per region; US dates M/D/YYYY; Québec codes unchanged", () => {
+  assert.equal(accounting.qboTaxCode({ taxPreset: "gst-qst-qc", customRate: 0 }), "TPS/TVQ QC");
+  assert.equal(accounting.qboTaxCode({ taxPreset: "hst-ns", customRate: 0 }), "TVH 14");
+  assert.equal(accounting.qboTaxCode({ taxPreset: "hst-on", customRate: 0 }, "en"), "HST ON");
+  assert.equal(accounting.qboTaxCode({ taxPreset: "fr-tva", customRate: 0 }, "fr", { vatRate: 5.5 }), "TVA 5,5 %");
+  assert.equal(accounting.qboTaxCode({ taxPreset: "us-sales", customRate: 6 }, "en"), "TAX");
+  assert.equal(accounting.qboTaxCode({ taxPreset: "us-sales", customRate: 0 }, "en"), "NON");
+  const { csv } = accounting.buildQboCsv([rdoc("1", "INV-1", "us-sales", one(100), {}, 8)], { ...qboOpts, region: { country: "US", sub: "NY" }, codeLang: "en" });
+  assert.ok(csv.split("\r\n")[1].startsWith("INV-1,Client,10/02/2026,10/31/2026,"));
+});
+
+console.log("regions: backup v5");
+await test("backup: Québec still writes v4 (no region key); other regions v5 with region; old file replace -> Québec; merge keeps this browser's region", () => {
+  const b = backup.buildBackup(store({ tq_region: JSON.stringify({ country: "FR", sub: "" }) }), oct);
+  assert.equal(b.version, 5); assert.deepEqual(b.data.region, { country: "FR", sub: "" });
+  const qcB = backup.buildBackup(store({}), oct);
+  assert.equal(qcB.version, 4); assert.equal("region" in qcB.data, false);
+  assert.equal(backup.buildBackup(store({ tq_region: JSON.stringify({ country: "CA", sub: "QC" }) }), oct).version, 4);
+  const parsed = backup.parseBackup(JSON.stringify(b)).backup;
+  assert.deepEqual(parsed.data.region, { country: "FR", sub: "" });
+  const old = backup.parseBackup(JSON.stringify({ format: "tradequote-backup", version: 4, exportedAt: oct.toISOString(), data: { history: [], company: { name: "Vieux", rbq: "1234-5678-01" } } })).backup;
+  assert.equal(old.data.region, undefined);
+  const rep = backup.planImport(store({ tq_region: JSON.stringify({ country: "US", sub: "TX" }) }), old, "replace", oct);
+  assert.deepEqual(rep.region, { country: "CA", sub: "QC" }); assert.equal(rep.set.tq_region, undefined); assert.ok(rep.remove.includes("tq_region"));
+  assert.equal(rep.company.rbq, "1234-5678-01");
+  const mOld = backup.planImport(store({}), old, "merge", oct);
+  assert.equal(mOld.region, null); assert.equal(mOld.set.tq_region, undefined);
+  assert.equal(backup.planImport(store({ tq_region: JSON.stringify({ country: "CA", sub: "QC" }) }), parsed, "merge", oct).region, null);
+  assert.deepEqual(backup.planImport(store({}), parsed, "merge", oct).region, { country: "FR", sub: "" });
+  assert.equal(backup.planImport(store({ tq_company: JSON.stringify({ name: "Toitures QC" }) }), parsed, "merge", oct).region, null);
+  // Québec: the key is removed rather than written (storage identical to before)
+  const toQc = backup.planImport(store({ tq_region: JSON.stringify({ country: "US", sub: "TX" }) }), old, "replace", oct);
+  assert.ok(toQc.remove.includes("tq_region")); assert.equal(toQc.set.tq_region, undefined);
+  assert.equal(backup.planImport(store({}), old, "replace", oct).remove.includes("tq_region"), false);
+  // region-specific company fields only kept when filled
+  assert.deepEqual(Object.keys(backup.sanitizeCompany({ name: "A", rbq: "", pst: "", licence: "L-1" })), ["name", "rbq", "licence"]);
+  const zh = backup.parseBackup(JSON.stringify({ ...b, data: { ...b.data, lang: "zh" } })).backup;
+  assert.equal(zh.data.lang, "zh");
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

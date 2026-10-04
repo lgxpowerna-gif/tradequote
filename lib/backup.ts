@@ -11,6 +11,9 @@
  * (`logo`, lib/logo.ts). Version 1 and 2 files are still accepted (no clients, no logo).
  * Version 4 (Oct. 2026): history entries can carry a `status` (and `paidAt` for paid invoices,
  * lib/status.ts). Older files are still accepted (entries without a status are shown as "sent").
+ * Version 5 (Oct. 2026): adds the business region (`region`, lib/region.ts) and the region-specific
+ * business fields (pst, licence, regNo, vatNo). Older files are still accepted and count as Québec.
+ * Québec businesses (the default region) still write version 4 files without a region key, exactly as before.
  *
  * What is exported: document history, business details (incl. RBQ licence), language, the Stripe
  * subscription id (so Pro carries over; it is re-verified with Stripe on the server at each load)
@@ -25,10 +28,13 @@ import { docKey, sanitizeFullDoc, type DocType, type SavedDoc } from "./docs";
 import { CLIENTS_KEY, mergeClients, sanitizeClients, type SavedClient } from "./clients";
 import { LOGO_KEY, sanitizeLogo, type Logo } from "./logo";
 import { sanitizeStatus } from "./status";
+import { DEFAULT_REGION, REGION_KEY, isQuebec, sanitizeRegion, type Region } from "./region";
 export type { DocType, SavedDoc };
 
 export const BACKUP_FORMAT = "tradequote-backup";
-export const BACKUP_VERSION = 4;
+export const BACKUP_VERSION = 5;
+/** Version written for Québec (default region): unchanged v4 format. */
+export const QC_BACKUP_VERSION = 4;
 export const MAX_BACKUP_BYTES = 8 * 1024 * 1024; // 8 MB (history + clients + logo)
 /** History kept in the browser (was 50; raised so merging two devices doesn't silently drop documents). */
 export const MAX_HISTORY = 500;
@@ -38,9 +44,11 @@ export const REMINDER_DAYS = 30;
 const DAY_MS = 86_400_000;
 const MAX_STR = 1000;
 
-export const COMPANY_FIELDS = ["name", "address", "city", "email", "phone", "bn", "gst", "qst", "rbq", "interac"] as const;
+export const COMPANY_FIELDS = ["name", "address", "city", "email", "phone", "bn", "gst", "qst", "rbq", "interac", "pst", "licence", "regNo", "vatNo"] as const;
 export type Company = Record<(typeof COMPANY_FIELDS)[number], string>;
-export type BackupLang = "fr" | "en";
+const REGION_COMPANY_FIELDS: readonly string[] = ["pst", "licence", "regNo", "vatNo"];
+export type BackupLang = "fr" | "en" | "zh" | "ar";
+const isBackupLang = (v: unknown): v is BackupLang => v === "fr" || v === "en" || v === "zh" || v === "ar";
 
 export type BackupData = {
   history: SavedDoc[];
@@ -51,6 +59,8 @@ export type BackupData = {
   usage?: { month: string; count: number };
   clients?: SavedClient[];
   logo?: Logo;
+  /** v5: business region (absent in older files = Québec). */
+  region?: Region;
 };
 export type Backup = { format: typeof BACKUP_FORMAT; app: "TradeQuote"; version: number; exportedAt: string; data: BackupData };
 
@@ -94,7 +104,11 @@ export function sanitizeCompany(v: unknown): Partial<Company> {
   const out: Partial<Company> = {};
   if (!v || typeof v !== "object" || Array.isArray(v)) return out;
   const o = v as Record<string, unknown>;
-  for (const k of COMPANY_FIELDS) { const s = str(o[k], 300); if (s !== null) out[k] = s; }
+  for (const k of COMPANY_FIELDS) {
+    const s = str(o[k], 300);
+    // Region-specific fields (v5) are kept only when filled: a Québec profile stays exactly as before.
+    if (s !== null && (s !== "" || !REGION_COMPANY_FIELDS.includes(k))) out[k] = s;
+  }
   return out;
 }
 
@@ -105,7 +119,7 @@ export function buildBackup(get: Getter, now: Date = new Date()): Backup {
     company: sanitizeCompany(safeJson(get("tq_company"))),
   };
   const lang = get("tq_lang");
-  if (lang === "fr" || lang === "en") data.lang = lang;
+  if (isBackupLang(lang)) data.lang = lang;
   if (get("tq_lang_choice") === "1") data.langChoice = true;
   const sub = get("tq_sub");
   if (isValidSubscriptionId(sub)) data.sub = sub;
@@ -116,7 +130,12 @@ export function buildBackup(get: Getter, now: Date = new Date()): Backup {
   if (clients.length) data.clients = clients;
   const logo = sanitizeLogo(safeJson(get(LOGO_KEY)));
   if (logo) data.logo = logo;
-  return { format: BACKUP_FORMAT, app: "TradeQuote", version: BACKUP_VERSION, exportedAt: now.toISOString(), data };
+  // Québec (the default) writes exactly the v4 format, as before: no region key, version 4, so the file
+  // stays identical and readable by earlier versions. Other regions write v5 with the region.
+  const region = sanitizeRegion(safeJson(get(REGION_KEY)));
+  const qc = isQuebec(region);
+  if (!qc) data.region = region;
+  return { format: BACKUP_FORMAT, app: "TradeQuote", version: qc ? QC_BACKUP_VERSION : BACKUP_VERSION, exportedAt: now.toISOString(), data };
 }
 
 /** Local date as YYYY-MM-DD. */
@@ -146,7 +165,7 @@ export function parseBackup(text: string, byteSize?: number): ParseResult {
   if (d.clients !== undefined && !Array.isArray(d.clients)) return { ok: false, error: "badShape" };
   const { docs, skipped } = sanitizeHistory(d.history);
   const data: BackupData = { history: docs, company: sanitizeCompany(d.company) };
-  if (d.lang === "fr" || d.lang === "en") data.lang = d.lang;
+  if (isBackupLang(d.lang)) data.lang = d.lang;
   if (d.langChoice === true) data.langChoice = true;
   if (isValidSubscriptionId(d.sub)) data.sub = d.sub;
   const u = d.usage as Record<string, unknown> | undefined;
@@ -156,6 +175,7 @@ export function parseBackup(text: string, byteSize?: number): ParseResult {
   if (clients.length) data.clients = clients;
   const logo = sanitizeLogo(d.logo);
   if (logo) data.logo = logo;
+  if (d.region !== undefined) data.region = sanitizeRegion(d.region);
   const exportedAt = typeof o.exportedAt === "string" && !isNaN(Date.parse(o.exportedAt)) ? o.exportedAt : "";
   return { ok: true, backup: { format: BACKUP_FORMAT, app: "TradeQuote", version: o.version, exportedAt, data }, skipped };
 }
@@ -220,6 +240,8 @@ export type ImportPlan = {
   clients: SavedClient[];
   clientsAdded: number;
   logo: Logo | null;
+  /** Region after the import (null = unchanged). */
+  region: Region | null;
 };
 
 /** Computes what an import writes, from the current localStorage (getter) and a parsed backup. */
@@ -276,7 +298,16 @@ export function planImport(get: Getter, backup: Backup, mode: ImportMode, now: D
   if (logo) { if (logo !== curLogo) set[LOGO_KEY] = JSON.stringify(logo); }
   else if (curLogo) remove.push(LOGO_KEY);
 
-  return { set, remove, history, company, lang, count, subChanged, added, duplicates, upgraded, clients: cm.clients, clientsAdded: cm.added, logo };
+  // Region (v5): replace -> the file's (older files = Québec); merge -> keep this browser's region,
+  // unless this browser has no region and no business details yet (new device) and the file has one.
+  let region: Region | null = null;
+  if (mode === "replace") region = d.region ?? { ...DEFAULT_REGION };
+  else if (d.region && get(REGION_KEY) === null && !curCompany.name) region = d.region;
+  // Québec is the default when no region is stored: remove the key rather than writing it (storage as before).
+  if (region && isQuebec(region)) { if (get(REGION_KEY) !== null) remove.push(REGION_KEY); }
+  else if (region) set[REGION_KEY] = JSON.stringify(region);
+
+  return { set, remove, history, company, lang, count, subChanged, added, duplicates, upgraded, clients: cm.clients, clientsAdded: cm.added, logo, region };
 }
 
 /** Gentle reminder: data older than REMINDER_DAYS and no export (or "later") in the last REMINDER_DAYS. */

@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: "%s | TradeQuote",
   },
   description:
-    "Soumissions et factures professionnelles en français pour entrepreneurs et gens de métier du Québec : licence RBQ imprimée, TPS 5 % + TVQ 9,975 %, acomptes, historique complet, partage par courriel, agenda, modèle Toiture. Export comptable QuickBooks/Excel avec Pro. Gratuit · Pro 19 $/mois.",
+    "Soumissions et factures professionnelles en français pour entrepreneurs et gens de métier du Québec : licence RBQ imprimée, TPS 5 % + TVQ 9,975 %, acomptes, historique complet, partage par courriel, agenda, modèle Toiture. Export comptable QuickBooks/Excel avec Pro. Aussi disponible partout au Canada (TPS/TVH/TVP), aux États-Unis et en France (TVA). Gratuit · Pro 19 $/mois (CAD).",
   keywords: [
     "contractor quote software Canada",
     "renovation invoice",
@@ -28,6 +28,10 @@ export const metadata: Metadata = {
     "deposit invoice Canada",
     "plumber electrician invoice",
     "soumission entrepreneur",
+    "HST invoice Ontario",
+    "contractor invoice USA sales tax",
+    "devis artisan TVA",
+    "facture auto-entrepreneur 293 B",
   ],
   authors: [{ name: "TradeQuote" }],
   creator: "TradeQuote",
@@ -42,12 +46,12 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "fr_CA",
-    alternateLocale: ["en_CA"],
+    alternateLocale: ["en_CA", "en_US", "fr_FR"],
     url: siteUrl,
     siteName: "TradeQuote",
     title: "TradeQuote – Soumissions conformes RBQ avec TPS/TVQ",
     description:
-      "Soumissions, acomptes et factures pour gens de métier. Licence RBQ, TPS/TVQ. Gratuit · Pro 19 $/mois.",
+      "Soumissions, acomptes et factures pour gens de métier. Licence RBQ, TPS/TVQ. Aussi disponible partout au Canada, aux États-Unis et en France. Gratuit · Pro 19 $/mois.",
   },
   twitter: {
     card: "summary_large_image",
@@ -70,9 +74,9 @@ const jsonLd = {
     { "@type": "Offer", price: "190.00", priceCurrency: "CAD", name: "Pro Yearly" },
   ],
   description:
-    "Logiciel de soumissions et factures pour entrepreneurs et gens de métier du Québec (RBQ, TPS/TVQ).",
+    "Logiciel de soumissions et factures pour entrepreneurs et gens de métier du Québec (RBQ, TPS/TVQ). Aussi disponible partout au Canada, aux États-Unis et en France.",
   url: siteUrl,
-  inLanguage: ["fr-CA", "en-CA"],
+  inLanguage: ["fr-CA", "en-CA", "en-US", "fr-FR"],
 };
 
 export default function RootLayout({

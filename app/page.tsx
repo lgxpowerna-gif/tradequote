@@ -1,8 +1,10 @@
 "use client";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { TAX_PRESETS, TEMPLATES, i18n, type Lang } from "@/lib/i18n";
-import { generateTradeQuotePDF, pdfFileName, tradeQuotePdfFile, type PdfArgs } from "@/lib/pdf";
-import { DEFAULT_TAX_PRESET, formatRate } from "@/lib/tax";
+import { LANGS, TAX_PRESETS, TEMPLATES, baseLang, i18n, isLang, isRtl, langLoaded, loadLang, type Lang } from "@/lib/i18n";
+import { ensurePdfFont, generateTradeQuotePDF, pdfFileName, tradeQuotePdfFile, type PdfArgs } from "@/lib/pdf";
+import { DEFAULT_TAX_PRESET, formatRate, lineVatRate, presetLabelOf, presetOf } from "@/lib/tax";
+import { DEFAULT_REGION, REGION_KEY, bizFields, defaultLang, defaultTaxPreset, formatDate, formatMoney, isQuebec, sameRegion, sanitizeRegion, taxPresetsFor, type BizField, type Region } from "@/lib/region";
+import { RegionSelect } from "@/components/RegionSelect";
 import { FREE_LIMIT, monthKey, countForThisMonth, resolvePro, isValidSubscriptionId, legacyProActive, migrateLegacyPlan } from "@/lib/plan";
 import { CheckoutConsent, LegalFooterLinks } from "@/components/LegalLinks";
 import { ManageSubscription } from "@/components/LegalClient";
@@ -22,17 +24,28 @@ import { sanitizeFullDoc } from "@/lib/docs";
 
 /** Default quote validity: 30 days (matches the default notes). */
 const in30 = () => { const d = new Date(); d.setDate(d.getDate() + 30); return localDate(d); };
-const NOTES = { fr: "Soumission valide 30 jours. Paiement à la réception de la facture. Merci de votre confiance.", en: "Quote valid for 30 days. Payment due on receipt of invoice. Thank you." };
+const NOTES: Record<Lang,string> = { fr: "Soumission valide 30 jours. Paiement à la réception de la facture. Merci de votre confiance.", en: "Quote valid for 30 days. Payment due on receipt of invoice. Thank you.", zh: "报价有效期 30 天。收到发票即付款。感谢您的信任。", ar: "عرض السعر صالح لمدة 30 يومًا. الدفع عند استلام الفاتورة. شكرًا لثقتكم." };
+/** Small strings not in the dictionary (fr / en wording unchanged). */
+const MSG: Record<Lang,{pdfDone:string;pdfErr:string;plans:string;yourBiz:string;quoteT:string;invT:string;legacy:string}> = {
+  fr: { pdfDone: "PDF téléchargé ✓", pdfErr: "Impossible de créer le PDF. Vérifiez votre connexion et réessayez.", plans: "Détails des forfaits et FAQ →", yourBiz: "Votre entreprise", quoteT: "SOUMISSION", invT: "FACTURE", legacy: "Votre accès Pro est conservé jusqu'au 31 décembre 2026. Pour le lier à votre abonnement Stripe, écrivez à " },
+  en: { pdfDone: "PDF downloaded ✓", pdfErr: "Could not create the PDF. Check your connection and try again.", plans: "Plan details & FAQ →", yourBiz: "Your business", quoteT: "QUOTE", invT: "INVOICE", legacy: "Your Pro access is kept until December 31, 2026. To link it to your Stripe subscription, email " },
+  zh: { pdfDone: "PDF 已下载 ✓", pdfErr: "无法生成 PDF。请检查网络连接后重试。", plans: "套餐详情和常见问题 →", yourBiz: "您的企业", quoteT: "报价单", invT: "发票", legacy: "您的 Pro 权限保留至 2026 年 12 月 31 日。如需关联到 Stripe 订阅，请发邮件至 " },
+  ar: { pdfDone: "تم تنزيل PDF ✓", pdfErr: "تعذر إنشاء PDF. تحقق من اتصالك وحاول مجددًا.", plans: "تفاصيل الخطط والأسئلة الشائعة ←", yourBiz: "شركتك", quoteT: "عرض سعر", invT: "فاتورة", legacy: "يبقى وصولك إلى Pro حتى 31 ديسمبر 2026. لربطه باشتراكك في Stripe، راسلنا على " },
+};
+const PRICING_HREF: Record<Lang,string> = { fr: "/tarifs", en: "/pricing", zh: "/zh/pricing", ar: "/ar/pricing" };
 const DRAFT_KEY = "tq_draft";
 
 type Plan="free"|"pro"; type DocType="quote"|"invoice"; type View="app"|"pricing"|"history"|"clients";
-type Item={id:number;description:string;quantity:number;unitPrice:number};
+type Item={id:number;description:string;quantity:number;unitPrice:number;vatRate?:number};
 type Saved=SavedDoc;
 const EMPTY_CLIENT={name:"",address:"",city:"",email:"",phone:""};
 const VIEWS:View[]=["app","history","clients","pricing"];
 const STATUS_COLORS:Record<DocStatus,string>={draft:"bg-slate-50 text-slate-700",sent:"bg-blue-50 text-blue-800",accepted:"bg-emerald-50 text-emerald-800",refused:"bg-red-50 text-red-700",paid:"bg-emerald-100 text-emerald-900"};
 const blankLine=()=>({id:Date.now(),description:"",quantity:1,unitPrice:0});
-const EMPTY_COMPANY={name:"",address:"",city:"",email:"",phone:"",bn:"",gst:"",qst:"",rbq:"",interac:""};
+const EMPTY_COMPANY={name:"",address:"",city:"",email:"",phone:"",bn:"",gst:"",qst:"",rbq:"",interac:"",pst:"",licence:"",regNo:"",vatNo:""};
+/** Stored business details: the region-specific fields are written only when filled, so a Québec profile is stored exactly as before. */
+const REGION_FIELDS=["pst","licence","regNo","vatNo"] as const;
+const storedCompany=(c:typeof EMPTY_COMPANY)=>{const o:Partial<typeof EMPTY_COMPANY>={...c}; for(const k of REGION_FIELDS) if(!o[k]) delete o[k]; return o;};
 
 export default function Home(){
   const [view,setView]=useState<View>("app");
@@ -46,6 +59,11 @@ export default function Home(){
   const [loading,setLoading]=useState(false);
   const [taxPreset,setTaxPreset]=useState(DEFAULT_TAX_PRESET);
   const [customRate,setCustomRate]=useState(0);
+  /** Business region (country + province/state); Québec by default. */
+  const [region,setRegion]=useState<Region>(DEFAULT_REGION);
+  /** US: optional local sales tax %. VAT countries: document VAT rate (undefined = preset default). */
+  const [localRate,setLocalRate]=useState(0);
+  const [docVat,setDocVat]=useState<number|undefined>(undefined);
   const [depositPct,setDepositPct]=useState(0);
   const [discountPct,setDiscountPct]=useState(0);
   const [toast,setToast]=useState<string|null>(null);
@@ -84,9 +102,14 @@ export default function Home(){
     const l=localStorage.getItem("tq_lang") as Lang|null;
     const hist=h?sanitizeHistory(JSON.parse(h)).docs:[];
     setCount(c); setHistory(hist); if(co)setCompany(prev=>({...prev,...JSON.parse(co)}));
-    const en=l==="en"&&localStorage.getItem("tq_lang_choice")==="1";
-    if(en)setLang("en");
-    setMeta(m=>({...m,notes:en?NOTES.en:m.notes,number:nextDocNumber(hist,"quote",en?"en":"fr"),date:localDate(),due:in30()}));
+    // Region: absent = Québec (unchanged experience). Language: the user's explicit choice, else the region's default.
+    const rg=sanitizeRegion(JSON.parse(localStorage.getItem(REGION_KEY)||"null")); setRegion(rg); setTaxPreset(defaultTaxPreset(rg));
+    const choice=localStorage.getItem("tq_lang_choice")==="1";
+    // Québec French unless the user explicitly chose another language (or the region's default is English).
+    const ll:Lang=choice&&isLang(l)?l:defaultLang(rg);
+    const en=ll!=="fr";
+    if(en)setLang(ll);
+    setMeta(m=>({...m,notes:en?NOTES[ll]:m.notes,number:nextDocNumber(hist,"quote",ll),date:localDate(),due:in30()}));
     const qv=new URLSearchParams(window.location.search).get("view"); if(qv==="pricing"||qv==="history"||qv==="clients")setView(qv);
     setClients(sanitizeClients(JSON.parse(localStorage.getItem(CLIENTS_KEY)||"[]")));
     setLogo(sanitizeLogo(JSON.parse(localStorage.getItem(LOGO_KEY)||"null")));
@@ -101,6 +124,7 @@ export default function Home(){
       setDocType(dr.type); setClient({...EMPTY_CLIENT,...dd.client}); setJobSite(dd.jobSite); setJobDate(dd.jobDate); setJobEndDate(dd.jobEndDate);
       if(dd.items.length)setItems(dd.items.map((it,i)=>({id:i+1,...it})));
       setTaxPreset(dd.taxPreset); setCustomRate(dd.customRate); setDiscountPct(dd.discountPct); setDepositPct(dd.depositPct);
+      setLocalRate(dd.localRate||0); setDocVat(dd.docVat);
       setOpenedKey(typeof dr.openedKey==="string"?dr.openedKey:null);
       setMeta(m=>({...m,number:dr.number.slice(0,100),date:typeof dr.date==="string"&&dr.date?dr.date:m.date,due:dd.due,notes:dd.notes}));
     }
@@ -108,6 +132,9 @@ export default function Home(){
     setReminder(exportReminderDue({lastExport:localStorage.getItem(LAST_EXPORT_KEY),snoozedAt:localStorage.getItem(BACKUP_SNOOZE_KEY),history:hist}));
   }catch{ setMeta(m=>m.number?m:{...m,number:nextDocNumber([],"quote","fr"),date:localDate(),due:in30()}); } setReady(true); },[]);
 
+  // Page language and direction (Arabic is right-to-left); preload the PDF font for zh / ar.
+  const [,setDictTick]=useState(0);
+  useEffect(()=>{ try{const h=document.documentElement; h.lang=lang==="fr"?"fr-CA":lang==="en"?"en-CA":lang==="zh"?"zh-CN":"ar"; if(isRtl(lang))h.dir="rtl"; else h.removeAttribute("dir");}catch{} if(lang==="zh"||lang==="ar"){ if(!langLoaded(lang))loadLang(lang).then(()=>setDictTick(n=>n+1)).catch(()=>{}); ensurePdfFont(lang).catch(()=>{}); } },[lang]);
   useEffect(()=>{ if(!ready)return; try{localStorage.setItem(CLIENTS_KEY,JSON.stringify(clients));}catch{setStorageErr(true);} },[clients,ready]);
   useEffect(()=>{ if(!ready)return; try{ if(logo)localStorage.setItem(LOGO_KEY,JSON.stringify(logo)); else localStorage.removeItem(LOGO_KEY);}catch{setStorageErr(true);} },[logo,ready]);
 
@@ -137,7 +164,7 @@ export default function Home(){
 
   useEffect(()=>{try{
     localStorage.setItem("tq_count",String(count)); localStorage.setItem("tq_count_month",monthKey());
-    localStorage.setItem("tq_history",JSON.stringify(history)); localStorage.setItem("tq_company",JSON.stringify(company)); localStorage.setItem("tq_lang",lang);
+    localStorage.setItem("tq_history",JSON.stringify(history)); localStorage.setItem("tq_company",JSON.stringify(storedCompany(company))); localStorage.setItem("tq_lang",lang);
     setStorageErr(false);
   }catch(e){ if(e instanceof DOMException&&/quota/i.test(e.name+e.message))setStorageErr(true); }},[count,history,company,lang]);
 
@@ -155,8 +182,13 @@ export default function Home(){
     }catch{} finally{clear();}})();
   },[]);
 
-  const money=useCallback((n:number)=>new Intl.NumberFormat(lang==="fr"?"fr-CA":"en-CA",{style:"currency",currency:"CAD"}).format(n),[lang]);
-  const totals=useMemo(()=>computeTotals(items,discountPct,taxPreset,customRate,depositPct,lang),[items,discountPct,taxPreset,customRate,depositPct,lang]);
+  const money=useCallback((n:number)=>formatMoney(n,region,lang),[lang,region]);
+  const totals=useMemo(()=>computeTotals(items,discountPct,taxPreset,customRate,depositPct,lang,{localRate,docVat}),[items,discountPct,taxPreset,customRate,depositPct,lang,localRate,docVat]);
+  const qc=isQuebec(region);
+  const preset=presetOf(taxPreset);
+  const vat=!!preset?.vat;
+  const presetIds=(()=>{const ids=taxPresetsFor(region); return ids.includes(taxPreset)?ids:[...ids,taxPreset];})();
+  const otherFields=qc?[]:bizFields(region,lang);
   const {subtotal,discountAmount:discAmt,total,depositAmt:depAmt,balance}=totals;
   const taxes={lines:totals.taxLines};
   const limited=plan==="free"&&count>=FREE_LIMIT;
@@ -166,11 +198,29 @@ export default function Home(){
   const add=()=>setItems(p=>[...p,{id:Date.now(),description:"",quantity:1,unitPrice:0}]);
   const rm=(id:number)=>setItems(p=>p.length>1?p.filter(i=>i.id!==id):[blankLine()]);
   const upd=(id:number,f:keyof Item,v:string|number)=>setItems(p=>p.map(i=>i.id===id?{...i,[f]:v}:i));
-  const tpl=(id:string)=>{const x=TEMPLATES.find(t=>t.id===id); if(!x)return; setItems(x.items.map((it,i)=>({id:Date.now()+i,description:it.description[lang],quantity:it.quantity,unitPrice:it.unitPrice}))); flash(t.tplLoaded,3500);};
+  const tpl=(id:string,lg:Lang=lang)=>{const x=TEMPLATES.find(t=>t.id===id); if(!x)return; setItems(x.items.map((it,i)=>({id:Date.now()+i,description:it.description[lg],quantity:it.quantity,unitPrice:it.unitPrice}))); flash(i18n[lg].tplLoaded,3500);};
+  /** Language switch: explicit (header / setup) or automatic (region change, only when the user never chose). */
+  const switchLang=(nl:Lang,explicit:boolean)=>{
+    if(explicit){try{localStorage.setItem("tq_lang_choice","1");}catch{}}
+    if(nl===lang)return;
+    // Automatic switch (region change): a new document's number follows the language (S-/Q-, F-/INV-). Default terms follow too (as before).
+    setMeta(m=>({...m,number:!explicit&&m.number===nextDocNumber(history,docType,lang)?nextDocNumber(history,docType,nl):m.number,notes:m.notes===NOTES[lang]?NOTES[nl]:m.notes})); setLang(nl);
+  };
+  /** Region change: region default taxes, and the region's language unless the user chose one. */
+  const changeRegion=(r:Region)=>{
+    setRegion(r); try{ if(isQuebec(r)) localStorage.removeItem(REGION_KEY); else localStorage.setItem(REGION_KEY,JSON.stringify(r));}catch{}
+    setTaxPreset(defaultTaxPreset(r)); setCustomRate(0); setLocalRate(0); setDocVat(undefined);
+    setItems(p=>p.map(({vatRate:_v,...i})=>i));
+    let choice=false; try{choice=localStorage.getItem("tq_lang_choice")==="1";}catch{}
+    if(!choice)switchLang(defaultLang(r),false);
+  };
   const flash=(msg:string,ms=2500)=>{setToast(msg); setTimeout(()=>setToast(null),ms);};
   const labels={description:t.description,qty:t.qty,rate:t.rate,subtotal:t.subtotal,total:t.total,depositAmt:t.depositAmt,balance:t.balance,discount:t.discount};
-  const argsFor=(type:DocType,m:{number:string;date:string;notes:string},d:FullDoc):PdfArgs=>({docType:type,lang,plan,meta:{number:m.number,date:m.date,notes:m.notes,due:d.due},logo,company,client:d.client,jobSite:d.jobSite,jobDate:d.jobDate,jobEndDate:d.jobEndDate,items:d.items,subtotal:d.subtotal,discountPct:d.discountPct,discountAmount:d.discountAmount,taxLines:d.taxLines,total:d.total,depositPct:d.depositPct,depositAmt:d.depositAmt,balance:d.balance,labels});
-  const currentDoc=(ov?:Item[]):FullDoc=>({client:{...client},jobSite,jobDate,jobEndDate,due:meta.due,notes:meta.notes,items:printableItems(ov??items).map(({description,quantity,unitPrice})=>({description,quantity,unitPrice})),taxPreset,customRate,discountPct,depositPct,...totals});
+  const argsFor=(type:DocType,m:{number:string;date:string;notes:string},d:FullDoc):PdfArgs=>({docType:type,lang,plan,meta:{number:m.number,date:m.date,notes:m.notes,due:d.due},logo,company,client:d.client,jobSite:d.jobSite,jobDate:d.jobDate,jobEndDate:d.jobEndDate,items:d.items,subtotal:d.subtotal,discountPct:d.discountPct,discountAmount:d.discountAmount,taxLines:d.taxLines,total:d.total,depositPct:d.depositPct,depositAmt:d.depositAmt,balance:d.balance,labels,region:d.region??DEFAULT_REGION,taxPreset:d.taxPreset,docVat:d.docVat});
+  /** Line as stored (vatRate only for VAT presets). */
+  const storeItem=({description,quantity,unitPrice,vatRate}:Item)=>vat&&vatRate!==undefined?{description,quantity,unitPrice,vatRate}:{description,quantity,unitPrice};
+  // Québec documents are stored exactly as before (no region field = Québec).
+  const currentDoc=(ov?:Item[]):FullDoc=>({client:{...client},jobSite,jobDate,jobEndDate,due:meta.due,notes:meta.notes,items:printableItems(ov??items).map(storeItem),taxPreset,customRate,discountPct,depositPct,...totals,...(taxPreset==="us-sales"&&localRate>0?{localRate}:{}),...(vat&&docVat?{docVat}:{}),...(qc?{}:{region})});
 
   /**
    * Saves the current document in the history (full copy) and returns the PDF arguments, or null when the
@@ -222,22 +272,22 @@ export default function Home(){
   const share=()=>guard("share");
   const doDownload=(ov?:Item[])=>{
     const a=saveCurrent("download",ov); if(!a)return;
-    generateTradeQuotePDF(a);
-    flash(lang==="fr"?"PDF téléchargé ✓":"PDF downloaded ✓");
+    generateTradeQuotePDF(a).then(()=>flash(MSG[lang].pdfDone),()=>flash(MSG[lang].pdfErr,4000));
   };
-  const schedInput=(number:string):ScheduleInput=>({lang,docType,number,clientName:client.name,clientEmail:client.email,clientAddress:[client.address,client.city].filter(Boolean).join(", "),jobSite,jobDate,jobEndDate,total:money(total).replace(/[\u202f\u00a0]/g," "),companyName:company.name,companyPhone:company.phone,companyEmail:company.email});
+  // Share e-mail and calendar text: French, or English for the other languages.
+  const schedInput=(number:string):ScheduleInput=>({lang:baseLang(lang),docType,number,clientName:client.name,clientEmail:client.email,clientAddress:[client.address,client.city].filter(Boolean).join(", "),jobSite,jobDate,jobEndDate,total:money(total).replace(/[\u202f\u00a0]/g," "),companyName:company.name,companyPhone:company.phone,companyEmail:company.email});
   /** Web Share API with the PDF file when supported (phones), else download + mailto with subject/body. */
   const doShare=async(ov?:Item[])=>{
     const a=saveCurrent("share",ov); if(!a)return;
     const si=schedInput(a.meta.number);
     let file:File|null=null;
-    try{file=tradeQuotePdfFile(a);}catch{file=null;}
+    try{file=await tradeQuotePdfFile(a);}catch{file=null;}
     const nav=navigator as Navigator&{canShare?:(d:ShareData)=>boolean};
     if(file&&typeof nav.share==="function"&&nav.canShare?.({files:[file]})){
       try{await nav.share({files:[file],title:shareSubject(si),text:shareBody(si)}); return;}
       catch(e){ if(e instanceof DOMException&&e.name==="AbortError")return; }
     }
-    generateTradeQuotePDF(a);
+    try{await generateTradeQuotePDF(a);}catch{flash(MSG[lang].pdfErr,4000);return;}
     const mt=mailtoLink(si);
     setShareHelp({file:pdfFileName(a),mailto:mt});
     window.location.href=mt;
@@ -246,7 +296,7 @@ export default function Home(){
   const downloadIcs=()=>{
     const ics=buildIcs(schedInput(meta.number)); if(!ics){flash(t.calNeedDate);return;}
     const url=URL.createObjectURL(new Blob([ics],{type:"text/calendar;charset=utf-8"}));
-    const el=document.createElement("a"); el.href=url; el.download=icsFileName({number:meta.number,lang});
+    const el=document.createElement("a"); el.href=url; el.download=icsFileName({number:meta.number,lang:baseLang(lang)});
     document.body.appendChild(el); el.click(); el.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
   const loadDoc=(d:Saved,mode:"open"|"duplicate")=>{
@@ -258,11 +308,12 @@ export default function Home(){
     setClient({...EMPTY_CLIENT,...x.client}); setJobSite(x.jobSite); setJobDate(mode==="open"?x.jobDate:""); setJobEndDate(mode==="open"?x.jobEndDate:"");
     setItems(x.items.length?x.items.map((it,i)=>({id:Date.now()+i,...it})):[{id:Date.now(),description:"",quantity:1,unitPrice:0}]);
     setTaxPreset(x.taxPreset); setCustomRate(x.customRate); setDiscountPct(x.discountPct); setDepositPct(x.depositPct);
+    setLocalRate(x.localRate||0); setDocVat(x.docVat);
     setOpenedKey(mode==="open"?docKey(d):null);
     setView("app"); window.scrollTo({top:0});
     flash(mode==="open"?`${t.opened} : ${d.number}`:`${t.duplicated} ${number}`);
   };
-  const reprint=(d:Saved)=>{ if(d.doc)generateTradeQuotePDF(argsFor(d.type,{number:d.number,date:d.date,notes:d.doc.notes},d.doc)); };
+  const reprint=(d:Saved)=>{ if(d.doc)generateTradeQuotePDF(argsFor(d.type,{number:d.number,date:d.date,notes:d.doc.notes},d.doc)).catch(()=>flash(MSG[lang].pdfErr,4000)); };
   const newDoc=()=>{
     setDocType("quote"); setMeta(m=>({...m,number:nextDocNumber(history,"quote",lang),date:localDate(),due:in30()}));
     setClient(EMPTY_CLIENT); setJobSite(""); setJobDate(""); setJobEndDate(""); setItems([{id:Date.now(),description:"",quantity:1,unitPrice:0}]);
@@ -308,6 +359,7 @@ export default function Home(){
     if((p.company.name||"").trim())setBizOpen(false);
     setCompany({...EMPTY_COMPANY,...p.company});
     setCount(p.count);
+    if(p.region&&!sameRegion(p.region,region)){setRegion(p.region); setTaxPreset(defaultTaxPreset(p.region)); setCustomRate(0); setLocalRate(0); setDocVat(undefined);}
     if(p.lang&&p.lang!==lang){const nl=p.lang; setMeta(m=>m.notes===NOTES[lang]?{...m,notes:NOTES[nl]}:m); setLang(nl);}
     if(p.subChanged){const sub=localStorage.getItem("tq_sub"); if(isValidSubscriptionId(sub)){setLegacyPro(false); checkSub(sub);}}
     flash(summary,4000);
@@ -328,8 +380,8 @@ export default function Home(){
     }catch{alert("Network error"); setLoading(false);}
   };
   useEffect(()=>{ if(!ready||!meta.number)return; try{
-    localStorage.setItem(DRAFT_KEY,JSON.stringify({type:docType,number:meta.number,date:meta.date,openedKey,doc:{client,jobSite,jobDate,jobEndDate,due:meta.due,notes:meta.notes,items:items.map(({description,quantity,unitPrice})=>({description,quantity,unitPrice})),taxPreset,customRate,discountPct,depositPct}}));
-  }catch{} },[ready,docType,meta,openedKey,client,jobSite,jobDate,jobEndDate,items,taxPreset,customRate,discountPct,depositPct]);
+    localStorage.setItem(DRAFT_KEY,JSON.stringify({type:docType,number:meta.number,date:meta.date,openedKey,doc:{client,jobSite,jobDate,jobEndDate,due:meta.due,notes:meta.notes,items:items.map(storeItem),taxPreset,customRate,discountPct,depositPct,...(taxPreset==="us-sales"&&localRate>0?{localRate}:{}),...(vat&&docVat?{docVat}:{})}}));
+  }catch{} },[ready,docType,meta,openedKey,client,jobSite,jobDate,jobEndDate,items,taxPreset,customRate,discountPct,depositPct,localRate,docVat]); // eslint-disable-line react-hooks/exhaustive-deps
   const inp="w-full border rounded-lg px-3 py-2 text-sm";
 
   return(
@@ -348,7 +400,7 @@ export default function Home(){
             ))}
           </nav>
           <div className="flex items-center gap-2">
-            <select value={lang} onChange={e=>{const nl=e.target.value as Lang; try{localStorage.setItem("tq_lang_choice","1");}catch{} setMeta(m=>m.notes===NOTES[lang]?{...m,notes:NOTES[nl]}:m); setLang(nl);}} className="text-xs border rounded-md px-2 py-1.5" aria-label="Langue / Language"><option value="fr">FR</option><option value="en">EN</option></select>
+            <select value={lang} onChange={e=>switchLang(e.target.value as Lang,true)} className="text-xs border rounded-md px-2 py-1.5" aria-label="Langue / Language / 语言 / اللغة" data-testid="lang">{LANGS.map(l=><option key={l.code} value={l.code}>{l.label}</option>)}</select>
             {plan==="free"?<button onClick={()=>setView("pricing")} className="bg-blue-600 text-white text-sm font-semibold px-3 py-1.5 rounded-lg">{t.upgrade}</button>
               :<span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">{t.pro}</span>}
           </div>
@@ -370,13 +422,14 @@ export default function Home(){
             <button disabled={loading} onClick={()=>upgrade("monthly")} className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold mb-2 disabled:opacity-60">{t.monthly}</button>
             <button disabled={loading} onClick={()=>upgrade("yearly")} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold mb-2 disabled:opacity-60">{t.yearly}</button>
             <button onClick={()=>setShowUp(false)} className="w-full text-slate-500 text-sm py-2">{t.continueFree}</button>
+            <p className="text-[11px] text-slate-400 text-center mb-1">{t.cadNote}</p>
             <CheckoutConsent lang={lang} className="text-center"/>
           </div>
         </div>
       )}
 
       {legacyPro&&<div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-xs px-4 py-2 text-center">
-        {lang==="fr"?"Votre accès Pro est conservé jusqu'au 31 décembre 2026. Pour le lier à votre abonnement Stripe, écrivez à ":"Your Pro access is kept until December 31, 2026. To link it to your Stripe subscription, email "}
+        {MSG[lang].legacy}
         <a href="mailto:lgxpowerna@gmail.com" className="underline">lgxpowerna@gmail.com</a>
       </div>}
       <main className="max-w-6xl mx-auto px-4 py-6">
@@ -401,7 +454,8 @@ export default function Home(){
                 <CheckoutConsent lang={lang} dark className="mt-3"/>
               </div>
             </div>
-            <p className="text-center text-xs text-slate-500 mt-4"><a href={lang==="fr"?"/tarifs":"/pricing"} className="text-blue-600 hover:underline">{lang==="fr"?"Détails des forfaits et FAQ →":"Plan details & FAQ →"}</a></p>
+            <p className="text-center text-xs text-slate-500 mt-4" data-testid="cad-note">{t.cadNote}</p>
+            <p className="text-center text-xs text-slate-500 mt-2"><a href={PRICING_HREF[lang]} className="text-blue-600 hover:underline">{MSG[lang].plans}</a></p>
           </div>
         )}
 
@@ -430,7 +484,7 @@ export default function Home(){
                 {shownHistory.map(d=>(
                   <li key={d.id} className="bg-white border rounded-xl p-3 text-sm" data-testid="hcard">
                     <div className="flex justify-between gap-2"><span className="font-semibold">{d.number}</span><span className="font-semibold whitespace-nowrap">{money(d.total)}</span></div>
-                    <div className="flex justify-between gap-2 text-xs text-slate-500 mb-2"><span className="truncate">{d.type==="quote"?t.quote:t.invoice} · {d.clientName}</span><span>{d.date}</span></div>
+                    <div className="flex justify-between gap-2 text-xs text-slate-500 mb-2"><span className="truncate">{d.type==="quote"?t.quote:t.invoice} · {d.clientName}</span><span>{formatDate(d.date,region)}</span></div>
                     <div className="flex flex-wrap items-end justify-between gap-2">
                       {statusCtl(d,"mstatus")}
                       {d.doc?(
@@ -456,7 +510,7 @@ export default function Home(){
                   <tbody>{shownHistory.length===0&&<tr><td colSpan={7} className="px-4 py-6 text-center text-slate-500">{t.noMatch}</td></tr>}{shownHistory.map(d=>(
                     <tr key={d.id} className="border-t">
                       <td className="hidden sm:table-cell px-4 py-3">{d.type==="quote"?t.quote:t.invoice}</td><td className="px-3 sm:px-4 py-3 font-medium whitespace-nowrap">{d.number}</td>
-                      <td className="px-3 sm:px-4 py-3">{d.clientName}<div className="sm:hidden text-[11px] text-slate-500">{d.date}</div></td><td className="hidden sm:table-cell px-4 py-3 text-slate-500">{d.date}</td>
+                      <td className="px-3 sm:px-4 py-3">{d.clientName}<div className="sm:hidden text-[11px] text-slate-500">{formatDate(d.date,region)}</div></td><td className="hidden sm:table-cell px-4 py-3 text-slate-500">{formatDate(d.date,region)}</td>
                       <td className="hidden sm:table-cell px-4 py-3">{statusCtl(d,"status")}</td>
                       <td className="px-3 sm:px-4 py-3 text-right font-medium whitespace-nowrap">{money(d.total)}</td>
                       <td className="px-3 sm:px-4 py-3 text-right sm:whitespace-nowrap">{d.doc?(
@@ -474,7 +528,7 @@ export default function Home(){
             )}
             </div>
             <BackupPanel lang={lang} t={t} lastExport={lastExport} onExport={exportData} onImported={onImported}/>
-            <AccountingExport lang={lang} t={t} history={history} pro={plan==="pro"} onUpgrade={()=>setView("pricing")} onDone={msg=>flash(msg)}/>
+            <AccountingExport lang={lang} t={t} history={history} pro={plan==="pro"} onUpgrade={()=>setView("pricing")} onDone={msg=>flash(msg)} region={region}/>
           </div>
         )}
 
@@ -488,8 +542,8 @@ export default function Home(){
         {view==="app"&&(
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {plan==="free"&&<div className="lg:col-span-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-900 flex flex-wrap items-center justify-between gap-2">
-              <span>{t.hero}</span>
-              <a href={lang==="fr"?"/tarifs":"/pricing"} className="text-blue-700 font-semibold hover:underline whitespace-nowrap">{t.seePricing} →</a>
+              <span>{t.hero} <span className="block text-xs text-blue-800/80 mt-0.5" data-testid="also-avail"><strong>{t.madeFor}</strong> {t.alsoAvail}</span></span>
+              <a href={PRICING_HREF[lang]} className="text-blue-700 font-semibold hover:underline whitespace-nowrap">{t.seePricing} →</a>
             </div>}
             {storageErr&&<div role="alert" className="lg:col-span-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-sm text-red-800">⚠️ {t.storageFull}</div>}
             {reminder&&<div role="status" className="lg:col-span-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 text-sm text-amber-900 flex flex-wrap items-center justify-between gap-2">
@@ -521,14 +575,19 @@ export default function Home(){
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       {logo&&<img src={logo.dataUrl} alt="" className="h-10 max-w-[6rem] object-contain"/>}
                       <div className="min-w-0"><div className="font-medium text-slate-800 truncate">{company.name}</div>
-                      <div className="text-xs text-slate-500 truncate">{[company.city,rbqOk?rbqLine(company.rbq,lang):"",company.phone].filter(Boolean).join(" · ")}</div></div>
+                      <div className="text-xs text-slate-500 truncate">{[company.city,qc?(rbqOk?rbqLine(company.rbq,lang):""):company.licence,company.phone].filter(Boolean).join(" · ")}</div></div>
                     </div>
                   ):(<>
+                  <div className="rounded-lg bg-slate-50 border p-2">
+                    <div className="text-[11px] font-semibold text-slate-600 mb-1">{t.region}</div>
+                    <RegionSelect t={t} lang={lang} region={region} onChange={changeRegion} testPrefix="biz"/>
+                  </div>
                   <input placeholder={t.companyName} value={company.name} onChange={e=>setCompany({...company,name:e.target.value})} className={inp}/>
                   <input placeholder={t.address} value={company.address} onChange={e=>setCompany({...company,address:e.target.value})} className={inp}/>
                   <input placeholder={t.city} value={company.city} onChange={e=>setCompany({...company,city:e.target.value})} className={inp}/>
                   <input placeholder={t.email} value={company.email} onChange={e=>setCompany({...company,email:e.target.value})} className={inp}/>
                   <input placeholder={t.phone} value={company.phone} onChange={e=>setCompany({...company,phone:e.target.value})} className={inp}/>
+                  {qc?(<>
                   <input placeholder={t.bn} value={company.bn} onChange={e=>setCompany({...company,bn:e.target.value})} className={inp}/>
                   <input placeholder={t.gst} value={company.gst} onChange={e=>setCompany({...company,gst:e.target.value})} className={inp}/>
                   <input placeholder={t.qst} value={company.qst} onChange={e=>setCompany({...company,qst:e.target.value})} className={inp}/>
@@ -537,6 +596,12 @@ export default function Home(){
                     <p className={`text-[11px] mt-1 ${company.rbq&&!rbqOk?"text-red-600":"text-slate-400"}`}>{company.rbq&&!rbqOk?t.rbqInvalid:t.rbqHint}</p>
                   </div>
                   <input placeholder={t.interac} value={company.interac} onChange={e=>setCompany({...company,interac:e.target.value})} className={inp}/>
+                  </>):otherFields.map(f=>(
+                    <div key={f.key}>
+                      <input placeholder={f.label} aria-label={f.label} value={company[f.key as BizField]||""} onChange={e=>setCompany({...company,[f.key]:e.target.value.slice(0,300)})} className={inp} data-testid={`biz-${f.key}`}/>
+                      {f.hint&&<p className="text-[11px] mt-1 text-slate-400" data-testid={`biz-${f.key}-hint`}>{f.hint}</p>}
+                    </div>
+                  ))}
                   <LogoPicker t={t} logo={logo} onChange={l=>{setLogo(l); if(l)flash(t.logoSaved);}}/>
                   {company.name.trim()&&<button type="button" onClick={()=>setBizOpen(false)} className="text-xs text-blue-600 hover:underline">✓ {t.save}</button>}
                   </>)}
@@ -570,7 +635,7 @@ export default function Home(){
                 <div className="flex justify-between mb-3"><div className="font-semibold text-sm">{t.items}</div>
                   <button onClick={add} className="text-sm text-blue-600 font-medium">{t.addItem}</button></div>
                 <div className="hidden sm:flex gap-2 text-[11px] uppercase text-slate-400 font-semibold px-1 mb-1">
-                  <span className="flex-1">{t.description}</span><span className="w-20">{t.qty}</span><span className="w-28">{t.rate}</span><span className="w-24 text-right">{t.lineTotal}</span><span className="w-4"/>
+                  <span className="flex-1">{t.description}</span>{vat&&<span className="w-24">{t.vatCol}</span>}<span className="w-20">{t.qty}</span><span className="w-28">{t.rate}</span><span className="w-24 text-right">{t.lineTotal}</span><span className="w-4"/>
                 </div>
                 {zeroNow.length>0&&<div role="status" className="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2 text-xs mb-3" data-testid="zero-warn">
                   <span>⚠️ {zeroNow.length} {t.zeroWarn}</span>
@@ -579,6 +644,10 @@ export default function Home(){
                 <div className="space-y-3 sm:space-y-2">{items.map(item=>(
                   <div key={item.id} className="grid grid-cols-[4.5rem_1fr_auto_auto] sm:flex gap-2 items-center border-b sm:border-0 pb-3 sm:pb-0" data-testid="line">
                     <input placeholder={t.description} value={item.description} onChange={e=>upd(item.id,"description",e.target.value)} className={`col-span-4 sm:flex-1 ${inp}`} data-testid="line-desc"/>
+                    {vat&&preset?.vat&&<label className="col-span-4 sm:contents"><span className="sm:hidden text-[10px] text-slate-400 block">{t.vatCol}</span>
+                    <select value={lineVatRate(taxPreset,item.vatRate,docVat)} onChange={e=>upd(item.id,"vatRate",+e.target.value)} className="w-full sm:w-24 border rounded-lg px-2 py-2 text-sm bg-white" aria-label={t.vatCol} data-testid="line-vat">
+                      {preset.vat.rates.map(r=><option key={r} value={r}>{formatRate(r,lang)}</option>)}
+                    </select></label>}
                     <label className="sm:contents"><span className="sm:hidden text-[10px] text-slate-400 block">{t.qty}</span>
                     <input type="number" inputMode="decimal" min={0} step={0.01} value={item.quantity||""} placeholder="0" onChange={e=>upd(item.id,"quantity",+e.target.value||0)} className="w-full sm:w-20 border rounded-lg px-3 py-2 text-sm" data-testid="line-qty"/></label>
                     <label className="sm:contents"><span className="sm:hidden text-[10px] text-slate-400 block">{t.rate}</span>
@@ -603,17 +672,18 @@ export default function Home(){
                 <div className="p-4 text-sm space-y-3">
                   <div className="flex justify-between">
                     <div>
-                      <div className="font-bold text-blue-600 text-base">{docType==="quote"?(lang==="fr"?"SOUMISSION":"QUOTE"):(lang==="fr"?"FACTURE":"INVOICE")}</div>
-                      <div className="text-xs text-slate-500">{meta.date}</div>
+                      <div className="font-bold text-blue-600 text-base">{docType==="quote"?MSG[lang].quoteT:MSG[lang].invT}</div>
+                      <div className="text-xs text-slate-500">{formatDate(meta.date,region)}</div>
                     </div>
-                    <div className="text-right text-xs"><div className="font-semibold">{company.name||(lang==="fr"?"Votre entreprise":"Your business")}</div><div className="text-slate-500">{company.city}</div>{rbqOk&&<div className="font-semibold text-slate-800">{rbqLine(company.rbq,lang)}</div>}</div>
+                    <div className="text-right text-xs"><div className="font-semibold">{company.name||MSG[lang].yourBiz}</div><div className="text-slate-500">{company.city}</div>{qc?rbqOk&&<div className="font-semibold text-slate-800">{rbqLine(company.rbq,lang)}</div>:company.licence&&<div className="text-slate-600">{company.licence}</div>}</div>
                   </div>
                   <div><div className="text-[10px] uppercase text-slate-400 font-semibold">{t.client}</div><div className="font-medium">{client.name||"—"}</div></div>
                   <div className="border-t pt-2 space-y-1 text-xs">
-                    <div className="flex justify-between"><span>{t.subtotal}</span><span>{money(subtotal)}</span></div>
+                    <div className="flex justify-between"><span>{vat?t.subtotalHT:t.subtotal}</span><span>{money(subtotal)}</span></div>
                     {discountPct>0&&<div className="flex justify-between text-emerald-600"><span>{t.discount} ({discountPct}%)</span><span>-{money(discAmt)}</span></div>}
-                    {taxes.lines.map(l=><div key={l.code} className="flex justify-between"><span>{l.label} ({formatRate(l.rate,lang)})</span><span>{money(l.amount)}</span></div>)}
-                    <div className="flex justify-between font-bold text-blue-700 text-sm pt-1 border-t"><span>{t.total}</span><span>{money(total)}</span></div>
+                    {taxes.lines.map(l=><div key={`${l.code}-${l.rate}`} className="flex justify-between" data-testid="tax-line"><span>{l.label} ({formatRate(l.rate,lang)})</span><span>{money(l.amount)}</span></div>)}
+                    <div className="flex justify-between font-bold text-blue-700 text-sm pt-1 border-t" data-testid="preview-total"><span>{vat?t.totalTTC:t.total}</span><span>{money(total)}</span></div>
+                    {preset?.mention&&<div className="text-[11px] font-semibold text-slate-700" data-testid="tax-mention" dir="ltr">{preset.mention[lang]??preset.mention.en}</div>}
                     {depositPct>0&&(<>
                       <div className="flex justify-between text-slate-600"><span>{t.depositAmt}</span><span>{money(depAmt)}</span></div>
                       <div className="flex justify-between font-semibold"><span>{t.balance}</span><span>{money(balance)}</span></div>
@@ -623,10 +693,22 @@ export default function Home(){
                 <div className="border-t p-4 space-y-3">
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">{t.tax}</label>
-                    <select value={taxPreset} onChange={e=>setTaxPreset(e.target.value)} className={inp}>
-                      {TAX_PRESETS.map(p=><option key={p.id} value={p.id}>{p.label[lang]}</option>)}
+                    <select value={taxPreset} onChange={e=>setTaxPreset(e.target.value)} className={inp} data-testid="tax-preset">
+                      {presetIds.map(id=>TAX_PRESETS.find(p=>p.id===id)).map(p=>p&&<option key={p.id} value={p.id}>{presetLabelOf(p,lang)}</option>)}
                     </select>
                     {taxPreset==="custom"&&<input type="number" step={0.001} value={customRate} onChange={e=>setCustomRate(+e.target.value||0)} className={`${inp} mt-2`} placeholder="%"/>}
+                    {taxPreset==="us-sales"&&<>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <label className="text-[11px] text-slate-500">{t.stateRate}<input type="number" min={0} max={30} step={0.001} value={customRate||""} placeholder="0" onChange={e=>setCustomRate(Math.min(30,Math.max(0,+e.target.value||0)))} className={inp} data-testid="us-rate"/></label>
+                        <label className="text-[11px] text-slate-500">{t.localRate}<input type="number" min={0} max={30} step={0.001} value={localRate||""} placeholder="0" onChange={e=>setLocalRate(Math.min(30,Math.max(0,+e.target.value||0)))} className={inp} data-testid="us-local"/></label>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">{t.usTaxHint}</p>
+                    </>}
+                    {preset?.vat&&<label className="block text-[11px] text-slate-500 mt-2">{t.vatDoc}
+                      <select value={docVat??preset.vat.default} onChange={e=>{setDocVat(+e.target.value); setItems(p=>p.map(({vatRate:_v,...i})=>i));}} className={inp} data-testid="vat-doc">
+                        {preset.vat.rates.map(r=><option key={r} value={r}>{formatRate(r,lang)}</option>)}
+                      </select></label>}
+                    {preset?.mention&&<p className="text-[11px] text-slate-500 mt-2" data-testid="franchise-note">{t.franchiseHint} <strong dir="ltr">« {preset.mention[lang]??preset.mention.en} »</strong></p>}
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 block mb-1">{t.discount}</label>
@@ -695,10 +777,11 @@ export default function Home(){
           <button type="button" onClick={()=>setShareHelp(null)} className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold" data-testid="share-help-ok">{t.shareOk}</button>
         </div>
       </div>}
-      {onb&&view==="app"&&<Onboarding t={t} lang={lang} biz={{name:company.name,rbq:company.rbq,gst:company.gst,qst:company.qst}} onBiz={b=>setCompany(c=>({...c,...b}))} logo={logo} onLogo={l=>setLogo(l)} onClose={finishOnb}/>}
+      {onb&&view==="app"&&<Onboarding t={t} lang={lang} region={region} onRegion={changeRegion} onLang={l=>switchLang(l,true)} biz={company} onBiz={b=>setCompany(c=>({...c,...b}))} logo={logo} onLogo={l=>setLogo(l)} onClose={finishOnb}/>}
       <footer className={`border-t mt-12 py-8 text-center text-sm text-slate-500 ${view==="app"?"pb-24 lg:pb-8":toast?"pb-24":""}`}>
         <p className="font-medium text-slate-700">{t.brand}</p>
         <p>{t.footer}</p>
+        <p className="text-xs mt-1">{t.madeFor} {t.alsoAvail}</p>
         <LegalFooterLinks lang={lang} className="mt-2"/>
         {plan==="pro"&&<div className="mt-2"><ManageSubscription lang={lang} compact/></div>}
         <p className="text-xs mt-2 text-slate-400">© {new Date().getFullYear()} {t.brand} – Mont-Laurier (QC) – {t.rights}</p>

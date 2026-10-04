@@ -20,7 +20,9 @@ export function isValidRbq(input: string): boolean {
 }
 
 /** Line printed on documents, e.g. "Licence RBQ : 1234-5678-01". Empty string if not valid. */
-export function rbqLine(input: string, lang: "fr" | "en" = "fr"): string {
+export function rbqLine(input: string, lang: "fr" | "en" | "zh" | "ar" = "fr"): string {
+  if (lang === "zh") return input && isValidRbq(input) ? `RBQ 执照：${formatRbq(input)}` : "";
+  if (lang === "ar") return input && isValidRbq(input) ? `RBQ: ${formatRbq(input)}` : "";
   if (!isValidRbq(input)) return "";
   return lang === "fr" ? `Licence RBQ : ${formatRbq(input)}` : `RBQ licence: ${formatRbq(input)}`;
 }
