@@ -105,8 +105,14 @@ export default function Home(){
     // Region: absent = Québec (unchanged experience). Language: the user's explicit choice, else the region's default.
     const rg=sanitizeRegion(JSON.parse(localStorage.getItem(REGION_KEY)||"null")); setRegion(rg); setTaxPreset(defaultTaxPreset(rg));
     const choice=localStorage.getItem("tq_lang_choice")==="1";
+    // ?lang=en|fr|zh|ar (directory listings, /en, /fr): overrides the language for this visit and is kept as the user's choice.
+    // Without the parameter nothing changes.
+    const qs=new URLSearchParams(window.location.search);
+    const qlRaw=qs.get("lang"); const ql=isLang(qlRaw)?qlRaw:null;
+    if(qlRaw!==null){ qs.delete("lang"); const rest=qs.toString(); window.history.replaceState(window.history.state,"",window.location.pathname+(rest?"?"+rest:"")+window.location.hash); }
+    if(ql){ localStorage.setItem("tq_lang",ql); localStorage.setItem("tq_lang_choice","1"); }
     // Québec French unless the user explicitly chose another language (or the region's default is English).
-    const ll:Lang=choice&&isLang(l)?l:defaultLang(rg);
+    const ll:Lang=ql??(choice&&isLang(l)?l:defaultLang(rg));
     const en=ll!=="fr";
     if(en)setLang(ll);
     setMeta(m=>({...m,notes:en?NOTES[ll]:m.notes,number:nextDocNumber(hist,"quote",ll),date:localDate(),due:in30()}));
