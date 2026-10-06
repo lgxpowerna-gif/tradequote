@@ -139,7 +139,7 @@ const base = {
     bn: "NEQ / N° d'entreprise", gst: "N° TPS/TVH", qst: "N° TVQ", interac: "Courriel Virement Interac",
     rbq: "Licence RBQ (ex. 1234-5678-01)", rbqHint: "Obligatoire sur vos soumissions et factures si vous détenez une licence RBQ.", rbqInvalid: "Un numéro RBQ a 10 chiffres : XXXX-XXXX-XX",
     freePrice: "0 $", proPrice: "19 $", orYear: "ou 190 $/an — 2 mois gratuits (économisez 38 $)", best: "MEILLEURE OFFRE", typeCol: "Type",
-    hero: "Soumission ou facture Québec : licence RBQ, TPS 5 % et TVQ 9,975 %, PDF en 30 secondes. Sans compte. 5 documents gratuits, puis 9 $.", seePricing: "Voir les tarifs", clientName: "Nom du client",
+    hero: "La soumission avec licence RBQ, TPS 5 % et TVQ 9,975 %, en PDF. Sans compte. 5 documents, puis 9 $.", seePricing: "Voir les tarifs", clientName: "Nom du client",
     docNumber: "Numéro", date: "Date", validUntil: "Validité / Échéance", description: "Description", qty: "Qté", rate: "Prix unitaire",
     preview: "Aperçu", noDocs: "Aucun document.", createFirst: "Créer ma première soumission →", used: "documents gratuits utilisés ce mois-ci",
     watermark: "Le plan gratuit inclut un petit filigrane", footer: "Conçu pour les entrepreneurs et gens de métier du Québec", rights: "Tous droits réservés",
