@@ -548,7 +548,7 @@ export default function Home(){
         {view==="app"&&(
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {plan==="free"&&<div className="lg:col-span-3 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-900 flex flex-wrap items-center justify-between gap-2">
-              <span>{t.hero} <span className="block text-xs text-blue-800/80 mt-0.5" data-testid="also-avail"><strong>{t.madeFor}</strong> {t.alsoAvail}</span></span>
+              <div><h1 className="text-sm font-normal">{t.hero}</h1><span className="block text-xs text-blue-800/80 mt-0.5" data-testid="also-avail"><strong>{t.madeFor}</strong> {t.alsoAvail}</span></div>
               <a href={PRICING_HREF[lang]} className="text-blue-700 font-semibold hover:underline whitespace-nowrap">{t.seePricing} →</a>
             </div>}
             {storageErr&&<div role="alert" className="lg:col-span-3 bg-red-50 border border-red-200 rounded-xl px-4 py-2 text-sm text-red-800">⚠️ {t.storageFull}</div>}
