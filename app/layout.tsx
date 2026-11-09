@@ -60,6 +60,9 @@ export const metadata: Metadata = {
       "Décrochez plus de contrats avec des soumissions pro. RBQ · TPS/TVQ · acomptes · Interac.",
   },
   category: "business",
+  applicationName: "TradeQuote",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, title: "TradeQuote", statusBarStyle: "default" },
 };
 
 const jsonLd = {
