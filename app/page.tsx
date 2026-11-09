@@ -1,11 +1,13 @@
 "use client";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { LANGS, TAX_PRESETS, TEMPLATES, baseLang, i18n, isLang, isRtl, langLoaded, loadLang, type Lang } from "@/lib/i18n";
 import { ensurePdfFont, generateTradeQuotePDF, pdfFileName, tradeQuotePdfFile, type PdfArgs } from "@/lib/pdf";
 import { DEFAULT_TAX_PRESET, formatRate, lineVatRate, presetLabelOf, presetOf } from "@/lib/tax";
 import { DEFAULT_REGION, REGION_KEY, bizFields, defaultLang, defaultTaxPreset, formatDate, formatMoney, isQuebec, sameRegion, sanitizeRegion, taxPresetsFor, type BizField, type Region } from "@/lib/region";
 import { RegionSelect } from "@/components/RegionSelect";
 import { FREE_LIMIT, monthKey, countForThisMonth, resolvePro, isValidSubscriptionId, legacyProActive, migrateLegacyPlan } from "@/lib/plan";
+import { ackSync, countLineItems, flushLocalSync, localSnapshotOk, noteLocalWrite, offlineGate, onNetworkChange, proForOffline, retryFlush, syncOfflineInstallation, type SyncState } from "@/lib/offline";
+import { OfflineBanner, OfflineLock } from "@/components/OfflineStatus";
 import { CheckoutConsent, LegalFooterLinks } from "@/components/LegalLinks";
 import { ManageSubscription } from "@/components/LegalClient";
 import { formatRbq, isValidRbq, rbqLine } from "@/lib/rbq";
@@ -78,6 +80,12 @@ export default function Home(){
   /** "Votre entreprise" panel: open until the business name is filled (decided after mount). */
   const [bizOpen,setBizOpen]=useState(true);
   const [ready,setReady]=useState(false);
+  const [online,setOnline]=useState(true);
+  const [gateReady,setGateReady]=useState(false);
+  const [sync,setSync]=useState<SyncState>({phase:"idle",offlineEdits:false});
+  const [installEvt,setInstallEvt]=useState<Event&{prompt:()=>Promise<void>}|null>(null);
+  const writeBoot=useRef(true);
+  const shellRef=useRef<HTMLDivElement>(null);
   /** First-run setup (new users only). */
   const [onb,setOnb]=useState(false);
   /** "X ligne(s) à 0 $" dialog before a download/share; zeroAck = lines the user chose to keep. */
@@ -164,9 +172,45 @@ export default function Home(){
     if(migrateLegacyPlan(localStorage.getItem("tq_plan"),localStorage.getItem("tq_sub"))==="legacy")localStorage.setItem("tq_legacy_pro","1");
     localStorage.removeItem("tq_plan");
     const sub=localStorage.getItem("tq_sub");
+    const legacyFlag=localStorage.getItem("tq_legacy_pro");
+    const last=parseInt(localStorage.getItem("tq_pro_confirmed_at")||"",10)||null;
+    // Decide from the device before the network answers, so a paid user who opens the app offline is not locked.
+    if(proForOffline({serverPro:null,lastConfirmedAt:last,legacyFlag})){setPlan("pro"); if(legacyProActive(legacyFlag))setLegacyPro(true);}
     if(isValidSubscriptionId(sub))checkSub(sub);
-    else if(legacyProActive(localStorage.getItem("tq_legacy_pro"))){setLegacyPro(true); setPlan("pro");}
-  }catch{}},[checkSub]);
+    else if(legacyProActive(legacyFlag)){setLegacyPro(true); setPlan("pro");}
+  }catch{} setGateReady(true); },[checkSub]);
+
+  useEffect(()=>{
+    const apply=(up:boolean)=>{ setOnline(up); setSync(s=>onNetworkChange(s,up)); };
+    const off=()=>apply(false); const on=()=>apply(true);
+    window.addEventListener("offline",off); window.addEventListener("online",on);
+    apply(navigator.onLine);
+    const onBip=(e:Event)=>{ e.preventDefault(); setInstallEvt(e as Event&{prompt:()=>Promise<void>}); };
+    window.addEventListener("beforeinstallprompt",onBip);
+    return()=>{ window.removeEventListener("offline",off); window.removeEventListener("online",on); window.removeEventListener("beforeinstallprompt",onBip); };
+  },[]);
+  // The worker (and its cache) exists only while Pro is confirmed. Free users lose it, including after a downgrade.
+  useEffect(()=>{
+    if(!gateReady)return;
+    syncOfflineInstallation(plan==="pro").catch(()=>{});
+  },[gateReady,plan]);
+  useEffect(()=>{
+    if(!ready)return;
+    if(writeBoot.current){ writeBoot.current=false; return; }
+    setSync(s=>noteLocalWrite(s,navigator.onLine));
+  },[ready,history,clients,company,items,client,meta,jobSite,jobDate,jobEndDate,docType,lang,logo,taxPreset,customRate,discountPct,depositPct,localRate,docVat]);
+  useEffect(()=>{
+    if(sync.phase!=="pending")return;
+    let historyRaw:string|null=null, clientsRaw:string|null=null, failed=false;
+    try{ historyRaw=localStorage.getItem("tq_history"); clientsRaw=localStorage.getItem(CLIENTS_KEY); }catch{ failed=true; }
+    setSync(s=>flushLocalSync(s,!failed&&localSnapshotOk({history:historyRaw,clients:clientsRaw})));
+    try{ const sub=localStorage.getItem("tq_sub"); if(isValidSubscriptionId(sub))checkSub(sub); }catch{}
+  },[sync.phase,checkSub]);
+  useEffect(()=>{
+    if(sync.phase!=="synced")return;
+    const id=window.setTimeout(()=>setSync(s=>ackSync(s)),6000);
+    return()=>window.clearTimeout(id);
+  },[sync.phase]);
 
   useEffect(()=>{try{
     localStorage.setItem("tq_count",String(count)); localStorage.setItem("tq_count_month",monthKey());
@@ -198,6 +242,13 @@ export default function Home(){
   const {subtotal,discountAmount:discAmt,total,depositAmt:depAmt,balance}=totals;
   const taxes={lines:totals.taxLines};
   const limited=plan==="free"&&count>=FREE_LIMIT;
+  const locked=gateReady&&offlineGate(online,plan==="pro")==="locked";
+  const showOffline=gateReady&&plan==="pro"&&!online;
+  const lineItemCount=countLineItems(history);
+  useEffect(()=>{
+    const el=shellRef.current; if(!el)return;
+    if(locked) el.setAttribute("inert",""); else el.removeAttribute("inert");
+  },[locked]);
   const existing=meta.number.trim()?history.find(d=>docKey(d)===docKey({type:docType,number:meta.number})):undefined;
   const rbqOk=isValidRbq(company.rbq);
 
@@ -391,7 +442,7 @@ export default function Home(){
   const inp="w-full border rounded-lg px-3 py-2 text-sm";
 
   return(
-    <div className="min-h-screen bg-slate-50">
+    <div ref={shellRef} className="min-h-screen bg-slate-50">
       <header className="bg-white border-b sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 cursor-pointer" onClick={()=>setView("app")}>
@@ -408,7 +459,12 @@ export default function Home(){
           <div className="flex items-center gap-2">
             <select value={lang} onChange={e=>switchLang(e.target.value as Lang,true)} className="text-xs border rounded-md px-2 py-1.5" aria-label="Langue / Language / 语言 / اللغة" data-testid="lang">{LANGS.map(l=><option key={l.code} value={l.code}>{l.label}</option>)}</select>
             {plan==="free"?<button onClick={()=>setView("pricing")} className="bg-blue-600 text-white text-sm font-semibold px-3 py-1.5 rounded-lg">{t.upgrade}</button>
-              :<span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">{t.pro}</span>}
+              :<span className="flex items-center gap-1.5">
+                <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-1 rounded-full font-medium">{t.pro}</span>
+                {showOffline&&<span className="text-xs bg-amber-100 text-amber-900 px-2 py-1 rounded-full font-semibold" data-testid="offline-status">{t.offlineStatus}</span>}
+                {sync.phase==="synced"&&<span className="text-xs bg-emerald-50 text-emerald-800 px-2 py-1 rounded-full font-semibold" data-testid="online-status">{t.offlineBack}</span>}
+                {installEvt&&!locked&&<button type="button" onClick={()=>{ void installEvt.prompt(); setInstallEvt(null); }} className="text-xs border border-blue-200 text-blue-700 px-2 py-1 rounded-lg font-medium" data-testid="install-app">{t.installApp}</button>}
+              </span>}
           </div>
         </div>
         <nav className="md:hidden grid grid-cols-4 border-t text-xs" aria-label="Navigation">
@@ -434,6 +490,10 @@ export default function Home(){
         </div>
       )}
 
+      {showOffline&&<OfflineBanner title={t.offlineTitle} body={t.offlineBody} counts={`${t.offlineDocs} : ${history.length} · ${t.offlineClients} : ${clients.length} · ${t.offlineItems} : ${lineItemCount} · ${t.offlineOnDevice}`}/>}
+      {plan==="pro"&&sync.phase==="pending"&&<p role="status" aria-live="polite" data-testid="offline-sync" className="bg-blue-50 border-b border-blue-100 text-blue-900 text-sm px-4 py-2 text-center">{t.offlineChecking}</p>}
+      {plan==="pro"&&sync.phase==="synced"&&<p role="status" aria-live="polite" data-testid="offline-sync" className="bg-emerald-50 border-b border-emerald-200 text-emerald-900 text-sm px-4 py-2 text-center">{sync.offlineEdits?t.offlineSyncedWrites:t.offlineSynced}</p>}
+      {plan==="pro"&&sync.phase==="error"&&<div role="alert" data-testid="offline-sync-error" className="bg-red-50 border-b border-red-200 text-red-900 text-sm px-4 py-2 text-center"><span>{t.offlineSyncFail}</span> <button type="button" onClick={()=>setSync(s=>retryFlush(s))} className="font-semibold underline">{t.offlineRetry}</button></div>}
       {legacyPro&&<div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-xs px-4 py-2 text-center">
         {MSG[lang].legacy}
         <a href="mailto:lgxpowerna@gmail.com" className="underline">lgxpowerna@gmail.com</a>
@@ -454,7 +514,7 @@ export default function Home(){
                 <div className="text-sm text-blue-100 font-semibold mb-1">{t.proPlan}</div>
                 <div className="text-3xl font-bold mb-1">{t.proPrice}<span className="text-base font-normal text-blue-200">{t.perMo}</span></div>
                 <p className="text-blue-100 text-sm mb-4">{t.orYear}</p>
-                <ul className="space-y-2 text-sm mb-6">{t.featurePro.map(f=><li key={f} className="flex gap-2"><span className="text-emerald-300">✓</span>{f}</li>)}</ul>
+                <ul className="space-y-2 text-sm mb-6" data-testid="pro-features">{t.featurePro.map(f=><li key={f} className="flex gap-2"><span className="text-emerald-300">✓</span>{f}</li>)}</ul>
                 <button disabled={loading} onClick={()=>upgrade("monthly")} className="w-full bg-white text-blue-700 py-2.5 rounded-xl font-semibold mb-2 disabled:opacity-60">{t.startMo}</button>
                 <button disabled={loading} onClick={()=>upgrade("yearly")} className="w-full bg-blue-500/40 border border-white/30 py-2.5 rounded-xl font-medium disabled:opacity-60">{t.startYr}</button>
                 <CheckoutConsent lang={lang} dark className="mt-3"/>
@@ -783,7 +843,8 @@ export default function Home(){
           <button type="button" onClick={()=>setShareHelp(null)} className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold" data-testid="share-help-ok">{t.shareOk}</button>
         </div>
       </div>}
-      {onb&&view==="app"&&<Onboarding t={t} lang={lang} region={region} onRegion={changeRegion} onLang={l=>switchLang(l,true)} biz={company} onBiz={b=>setCompany(c=>({...c,...b}))} logo={logo} onLogo={l=>setLogo(l)} onClose={finishOnb}/>}
+      {onb&&view==="app"&&!locked&&<Onboarding t={t} lang={lang} region={region} onRegion={changeRegion} onLang={l=>switchLang(l,true)} biz={company} onBiz={b=>setCompany(c=>({...c,...b}))} logo={logo} onLogo={l=>setLogo(l)} onClose={finishOnb}/>}
+      {locked&&<OfflineLock title={t.offlineLockedTitle} body={t.offlineLockedBody}/>}
       <footer className={`border-t mt-12 py-8 text-center text-sm text-slate-500 ${view==="app"?"pb-24 lg:pb-8":toast?"pb-24":""}`}>
         <p className="font-medium text-slate-700">{t.brand}</p>
         <p>{t.footer}</p>

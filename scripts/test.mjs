@@ -751,5 +751,124 @@ await test("backup: Québec still writes v4 (no region key); other regions v5 wi
   assert.equal(zh.data.lang, "zh");
 });
 
+const offline = await load("lib/offline.ts");
+const i18nMod = await load("lib/i18n.ts");
+console.log("offline");
+const nowMs = Date.UTC(2026, 10, 9, 12);
+const day = 86400000;
+await test("service worker version is shared with public/sw.js and names the cache", () => {
+  const sw = fs.readFileSync(path.join(root, "public/sw.js"), "utf8");
+  const found = sw.match(/const SW_VERSION = "([^"]+)"/);
+  assert.ok(found, "SW_VERSION in public/sw.js");
+  assert.equal(found[1], offline.SW_VERSION);
+  assert.match(offline.SW_VERSION, /^tq-offline-\d+$/);
+  assert.equal(offline.CACHE_NAME, "tradequote-" + offline.SW_VERSION);
+  assert.equal(offline.serviceWorkerUrl(), `/sw.js?v=${encodeURIComponent(offline.SW_VERSION)}`);
+  assert.ok(sw.includes("skipWaiting"));
+  assert.ok(sw.includes('startsWith("/api/")'));
+  assert.ok(sw.includes('pathname === "/sw.js"'));
+  for (const pathName of offline.SHELL_URLS) assert.ok(sw.includes(`"${pathName}"`), pathName);
+  assert.equal(/sk_live|sk_test|whsec_|STRIPE_SECRET|STRIPE_WEBHOOK/.test(sw), false);
+  assert.equal(/sk_live|sk_test|whsec_/.test(fs.readFileSync(path.join(root, "lib/offline.ts"), "utf8")), false);
+});
+await test("installable manifest and icons", () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, "public/manifest.webmanifest"), "utf8"));
+  assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.start_url, "/");
+  assert.ok(manifest.icons.some((icon) => icon.sizes === "192x192"));
+  assert.ok(manifest.icons.some((icon) => icon.sizes === "512x512" && icon.purpose === "maskable"));
+  for (const icon of manifest.icons) {
+    const buf = fs.readFileSync(path.join(root, "public", icon.src.replace(/^\//, "")));
+    assert.equal(buf.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  }
+});
+await test("offline gate: only a confirmed Pro plan works without a network", () => {
+  assert.equal(offline.offlineGate(false, false), "locked");
+  assert.equal(offline.offlineGate(true, false), "open");
+  assert.equal(offline.offlineGate(false, true), "open");
+  assert.equal(offline.offlineGate(true, true), "open");
+  assert.equal(offline.shouldRegisterServiceWorker(false), false);
+  assert.equal(offline.shouldRegisterServiceWorker(true), true);
+  assert.equal(offline.shouldPurgeServiceWorker(false), true);
+  assert.equal(offline.shouldPurgeServiceWorker(true), false);
+});
+await test("unpaid users cannot turn a failed or stale Stripe check into offline Pro", () => {
+  const unpaid = { serverPro: null, lastConfirmedAt: null, legacyFlag: null, now: nowMs };
+  assert.equal(offline.proForOffline(unpaid), false);
+  assert.equal(offline.offlineGate(false, offline.proForOffline(unpaid)), "locked");
+  // Server "no" wins over a fresh confirmation. A stored plan label is not an input.
+  assert.equal(offline.proForOffline({ serverPro: false, lastConfirmedAt: nowMs, legacyFlag: null, now: nowMs }), false);
+  assert.equal(offline.proForOffline({ serverPro: false, lastConfirmedAt: nowMs, legacyFlag: "pro", now: nowMs }), false);
+  assert.equal(offline.proForOffline({ serverPro: null, lastConfirmedAt: nowMs - 8 * day, legacyFlag: null, now: nowMs }), false);
+  // Grace and a live subscription do unlock offline.
+  assert.equal(offline.proForOffline({ serverPro: null, lastConfirmedAt: nowMs - day, legacyFlag: null, now: nowMs }), true);
+  assert.equal(offline.proForOffline({ serverPro: true, lastConfirmedAt: null, legacyFlag: null, now: nowMs }), true);
+  assert.equal(offline.proForOffline({ serverPro: null, lastConfirmedAt: null, legacyFlag: "1", now: Date.UTC(2026, 11, 1) }), true);
+  assert.equal(offline.proForOffline({ serverPro: null, lastConfirmedAt: null, legacyFlag: "1", now: Date.UTC(2027, 0, 1, 6) }), false);
+});
+await test("service worker never caches the API, the worker, or another origin", () => {
+  const origin = "https://tradequote.faitle.net";
+  assert.equal(offline.isCacheableRequest({ url: origin + "/api/subscription-status", origin }), false);
+  assert.equal(offline.isCacheableRequest({ url: origin + "/api/webhook", origin }), false);
+  assert.equal(offline.isCacheableRequest({ url: origin + "/api/create-checkout-session", method: "POST", origin }), false);
+  assert.equal(offline.isCacheableRequest({ url: origin + "/api/verify-session", method: "POST", origin }), false);
+  assert.equal(offline.isCacheableRequest({ url: origin + "/sw.js?v=tq-offline-1", origin }), false);
+  assert.equal(offline.isCacheableRequest({ url: "https://js.stripe.com/v3/", origin }), false);
+  assert.equal(offline.isCacheableRequest({ url: origin + "/", origin }), true);
+  assert.equal(offline.isCacheableRequest({ url: origin + "/_next/static/chunks/app.js", origin }), true);
+  assert.equal(offline.isCacheableRequest({ url: origin + "/fonts/tq-zh.ttf", origin }), true);
+  const shell = offline.shellUrlsFromDocument(
+    [origin + "/_next/static/chunks/main.js", "https://js.stripe.com/v3", origin + "/api/webhook"],
+    origin,
+  );
+  assert.ok(shell.includes(origin + "/"));
+  assert.ok(shell.includes(origin + "/_next/static/chunks/main.js"));
+  assert.equal(shell.some((url) => url.includes("/api/")), false);
+  assert.equal(shell.some((url) => url.includes("stripe.com")), false);
+});
+await test("reconnect confirms the local snapshot and does not accept a remote document payload", () => {
+  let state = { phase: "idle", offlineEdits: false };
+  state = offline.onNetworkChange(state, false);
+  assert.deepEqual(state, { phase: "offline", offlineEdits: false });
+  assert.equal(offline.noteLocalWrite(state, true), state);
+  state = offline.noteLocalWrite(state, false);
+  assert.equal(offline.noteLocalWrite(state, false), state);
+  assert.deepEqual(state, { phase: "offline", offlineEdits: true });
+  state = offline.onNetworkChange(state, true);
+  assert.deepEqual(state, { phase: "pending", offlineEdits: true });
+  const broken = offline.flushLocalSync(state, false);
+  assert.deepEqual(broken, { phase: "error", offlineEdits: true });
+  assert.equal(offline.flushLocalSync(broken, true), broken);
+  state = offline.retryFlush(broken);
+  assert.equal(state.phase, "pending");
+  // flushLocalSync only takes the local readability flag — there is no remote list to merge in.
+  state = offline.flushLocalSync(state, true);
+  assert.deepEqual(state, { phase: "synced", offlineEdits: true });
+  assert.deepEqual(offline.ackSync(state), { phase: "idle", offlineEdits: false });
+  assert.equal(offline.localSnapshotOk({ history: null, clients: null }), true);
+  assert.equal(offline.localSnapshotOk({ history: "[]", clients: "[]" }), true);
+  assert.equal(offline.localSnapshotOk({ history: "{", clients: "[]" }), false);
+  assert.equal(offline.localSnapshotOk({ history: "[]", clients: "{}" }), false);
+  assert.equal(offline.localSnapshotOk({ history: '{"docs":[]}', clients: "[]" }), false);
+  assert.equal(offline.countLineItems([{ doc: { items: [{}, {}, {}] } }, { doc: null }, {}]), 3);
+});
+await test("offline mode is listed on the paid plan in every language", () => {
+  assert.ok(i18nMod.i18n.en.featurePro.some((line) => /offline/i.test(line)));
+  assert.ok(i18nMod.i18n.fr.featurePro.some((line) => line.includes("hors ligne")));
+  assert.ok(i18nMod.i18n.en.offlineLockedTitle.includes("Pro"));
+  assert.ok(i18nMod.i18n.fr.offlineLockedBody.includes("Pro"));
+  assert.ok(i18nMod.i18n.zh.offlineStatus);
+  const zh = fs.readFileSync(path.join(root, "lib/i18n-zh.ts"), "utf8");
+  const ar = fs.readFileSync(path.join(root, "lib/i18n-ar.ts"), "utf8");
+  const pricing = fs.readFileSync(path.join(root, "components/PricingPage.tsx"), "utf8");
+  assert.ok(zh.includes("离线模式：无网络也可使用报价单、客户和项目"));
+  assert.ok(ar.includes("وضع بدون اتصال: عروض الأسعار والعملاء والبنود بدون شبكة"));
+  for (const phrase of ["Mode hors ligne", "Offline mode", "离线模式", "وضع بدون اتصال"]) {
+    assert.ok(pricing.includes(phrase), phrase);
+  }
+  assert.equal(pricing.match(/export const PRICE_MONTHLY = (\d+)/)[1], "19");
+  assert.equal(pricing.match(/export const PRICE_YEARLY = (\d+)/)[1], "190");
+});
+
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(process.exitCode ? "FAILED" : `\n${passed} tests passed`);
